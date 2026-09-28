@@ -35,9 +35,22 @@ const SYSTEM_NAMES = { hubspot: 'HubSpot', jira: 'Jira', intercom: 'Intercom', s
 const first = (name) => String(name).split(' ')[0];
 const stageLabel = (id) => DEAL_STAGES.find((x) => x.id === id)?.label ?? id;
 
-// A failed call stops the action; the user gets a plain explanation instead of an HTTP status.
+// A failed call stops the action. When the system gave a reason (e.g. Slack's "channel_not_found"), show it,
+// so the fix is obvious; otherwise it most likely didn't answer at all.
+const HINTS = {
+  channel_not_found: 'the channel or member ID doesn\'t exist in this workspace (check SLACK_DM_USER_ID and the channel names)',
+  not_in_channel: 'the app isn\'t in that channel (add chat:write.public, or invite the app)',
+  missing_scope: 'the app is missing a permission (see Connections → Slack → How to connect)',
+  invalid_auth: 'the token isn\'t valid (check SLACK_BOT_TOKEN)',
+  not_authed: 'no token was sent (check SLACK_BOT_TOKEN)',
+};
 function failIfRejected(entry) {
-  if (!entry.ok) throw new HttpError(502, `${SYSTEM_NAMES[entry.system] ?? entry.system} didn't respond, so nothing was changed. Please try again in a minute.`);
+  if (entry.ok) return;
+  const name = SYSTEM_NAMES[entry.system] ?? entry.system;
+  const reason = entry.status && entry.response && typeof entry.response === 'object' ? (entry.response.error ?? entry.response.message) : null;
+  throw new HttpError(502, reason
+    ? `${name} said “${reason}”${HINTS[reason] ? `: ${HINTS[reason]}` : ''}. Nothing was changed.`
+    : `${name} didn't respond, so nothing was changed. Please try again in a minute.`);
 }
 
 // Any change can move an account's health, so recompute before telling the UI.

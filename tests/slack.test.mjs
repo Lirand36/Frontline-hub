@@ -6,6 +6,7 @@ process.env.SLACK_BOT_TOKEN = 'xoxb-test';
 process.env.SLACK_DM_USER_ID = 'UME';
 
 const calls = [];
+let failPosts = null; // set to a Slack error code to make chat.postMessage fail
 let taken = new Set(['onb-harborline']);
 globalThis.fetch = async (url, init = {}) => {
   const path = new URL(String(url)).pathname;
@@ -14,6 +15,7 @@ globalThis.fetch = async (url, init = {}) => {
   const json = (x) => new Response(JSON.stringify(x));
   if (path === '/api/conversations.create') return json(taken.has(body.name) ? { ok: false, error: 'name_taken' } : { ok: true, channel: { id: 'CNEW', name: body.name } });
   if (path === '/api/auth.test') return json({ ok: true, team: 'Acme', user: 'frontline-hub' });
+  if (failPosts && path === '/api/chat.postMessage') return json({ ok: false, error: failPosts });
   return json({ ok: true, channel: body.channel, ts: '1.1' });
 };
 
@@ -58,4 +60,19 @@ test('connection test reads the workspace', async () => {
   assert.equal(r.ok, true);
   assert.equal(r.response.team, 'Acme');
   assert.ok(typeof dealSignals === 'function');
+});
+
+test('when Slack refuses, the person sees why (not just "didn\'t respond")', async () => {
+  const svc = await import('../src/services.js');
+  failPosts = 'channel_not_found';
+  await assert.rejects(
+    svc.requestMoveBack('lakeview', { to: 'appointmentscheduled', reason: 'Moved by mistake' }, 'Maya K.'),
+    (err) => err.status === 502 && /Slack said “channel_not_found”: the channel or member ID doesn't exist/.test(err.message),
+  );
+  failPosts = null;
+  const r = await svc.requestMoveBack('lakeview', { to: 'appointmentscheduled', reason: 'Moved by mistake' }, 'Maya K.');
+  assert.equal(r.request.status, 'pending');
+  const dmToAdmin = calls.filter((c) => c.path === '/api/chat.postMessage').at(-1).body;
+  assert.equal(dmToAdmin.channel, 'UME', 'the admin DM is redirected to you');
+  assert.match(dmToAdmin.text, /^For Alex M\.: Move-back request: Lakeview Lodges/);
 });

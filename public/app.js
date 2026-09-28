@@ -71,6 +71,26 @@ function urgency(c) {
   if (mins < 0) return { tone: 'bad', text: `Reply overdue ${fmtMins(-mins)}` };
   return { tone: mins <= 30 ? 'warn' : 'calm', text: `Reply due in ${fmtMins(mins)}` };
 }
+// A reply-due line that keeps itself current: tickDue() updates text and colour every 15s without a re-render.
+function dueTag(c, cls = 'st', tag = 'span') {
+  const u = urgency(c);
+  if (!u) return '';
+  const mins = Math.round((new Date(c.slaDueAt) - Date.now()) / 60000);
+  return `<${tag} class="${cls} ${u.tone} ${mins >= 0 && mins <= 15 ? 'soon' : ''}" data-due="${esc(c.slaDueAt)}"><svg class="ico"><use href="#i-clock"/></svg><span class="due-text">${u.text}</span></${tag}>`;
+}
+function tickDue() {
+  $$('[data-due]').forEach((el) => {
+    const u = urgency({ state: 'open', slaDueAt: el.dataset.due });
+    const mins = Math.round((new Date(el.dataset.due) - Date.now()) / 60000);
+    ['bad', 'warn', 'calm'].forEach((t) => el.classList.toggle(t, t === u.tone));
+    el.classList.toggle('soon', mins >= 0 && mins <= 15);
+    const txt = $('.due-text', el);
+    if (txt && txt.textContent !== u.text) txt.textContent = u.text;
+    const tr = el.closest('tr');
+    if (tr) { tr.classList.remove('u-bad', 'u-warn', 'u-calm', 'u-none'); tr.classList.add(`u-${u.tone}`); }
+  });
+}
+
 // Line icon from the sprite in index.html (names start with i-); anything else is shown as text.
 const icon = (name, cls = '') => (String(name ?? '').startsWith('i-') ? `<svg class="ico ${cls}" aria-hidden="true"><use href="#${esc(name)}"/></svg>` : esc(name ?? ''));
 const segBadge = (seg) => (seg === 'Enterprise' ? '<span class="seg-badge" title="Enterprise customer">Enterprise</span>' : '');
@@ -134,6 +154,7 @@ function scheduleRender() {
     const a = document.activeElement;
     if (a && view.contains(a) && /INPUT|TEXTAREA|SELECT/.test(a.tagName) && a.value) return;
     if ($('#modal').open) return;
+    if (motion.busy) { scheduleRender(); return; } // let a "done" animation finish first
     route({ keepScroll: true });
   }, 250);
 }
@@ -159,7 +180,12 @@ function connectEvents() {
 }
 
 async function refreshBadges() {
-  const set = (id, n) => { const b = $(id); b.hidden = !n; b.textContent = n; };
+  const set = (id, n) => {
+    const b = $(id);
+    const up = n > Number(b.textContent || 0) && !b.hidden;
+    b.hidden = !n; b.textContent = n;
+    if (up) replay(b, 'bump');
+  };
   const [inbox, approvals, accounts] = await Promise.all([
     can('inbox.work') ? api('/api/inbox') : [], can('approvals.view') ? api('/api/approvals') : [], can('portfolio.view') ? api('/api/accounts') : [],
   ]);
@@ -183,7 +209,7 @@ function sparkline(values, { label = '', alert = false, w = 160, h = 40 } = {}) 
   const pts = values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
   const last = values.length - 1;
   const weekOf = (i) => new Date(Date.now() - (last - i) * 7 * 86400000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  return `<svg class="spark ${alert ? 'alert' : ''}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="${esc(label)}: ${values.join(', ')} over the last ${values.length} weeks">
+  return `<svg class="spark ${alert ? 'alert' : ''}" data-draw viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="${esc(label)}: ${values.join(', ')} over the last ${values.length} weeks">
     <polyline points="${pts}" fill="none" vector-effect="non-scaling-stroke"/>
     <circle cx="${x(last)}" cy="${y(values[last])}" r="4" class="last"/>
     ${values.map((v, i) => `<circle cx="${x(i)}" cy="${y(v)}" r="9" class="hit"><title>Week of ${weekOf(i)}: ${v.toLocaleString('en-US')}</title></circle>`).join('')}
@@ -240,7 +266,7 @@ async function renderHome() {
     </div>
     <div class="card">
       ${d.actions.map((a) => `
-        <div class="gm-action p-${a.priority}">
+        <div class="gm-action p-${a.priority}" data-key="${esc(a.title)}">
           <span class="gm-ico" aria-hidden="true">${icon(a.icon)}</span>
           <div class="grow">
             <div class="gm-title">${esc(a.title)} ${a.badge ? segBadge(a.badge) : ''}</div>
@@ -342,7 +368,7 @@ function formDialog(html, submitLabel, onSubmit, { danger = false } = {}) {
 }
 
 // Move a deal, asking for whatever the target stage requires first.
-function moveDeal(a, to, after = () => route({ keepScroll: true })) {
+function moveDeal(a, to, after = afterAction) {
   if (to === a.deal.stage) return;
   const gates = gatesBetween(a.deal.stage, to);
   const post = (fields) => api(`/api/accounts/${a.id}/deal-stage`, { method: 'POST', body: { stage: to, fields, tz: browserTz() } }).then(after);
@@ -366,14 +392,14 @@ function moveDeal(a, to, after = () => route({ keepScroll: true })) {
   return form;
 }
 
-function editDealDetails(a, gates, after = () => route({ keepScroll: true })) {
+function editDealDetails(a, gates, after = afterAction) {
   formDialog(`<h2>${esc(a.name)}: deal details</h2>
     <p class="muted small mb-3">Needed for the stage it's in. Saved to HubSpot${gates.includes('presentationscheduled') ? ', and the Solutions Engineer gets the demo details in Slack' : ''}.</p>
     ${gateFieldsHtml(a, gates)}`, 'Save details',
     (f) => { const m = gateCheck(f, gates); if (m) throw new Error(m); return api(`/api/accounts/${a.id}/deal-fields`, { method: 'POST', body: { fields: collectGate(f, gates), tz: browserTz() } }).then(after); });
 }
 
-function editCloseDate(a, after = () => route({ keepScroll: true })) {
+function editCloseDate(a, after = afterAction) {
   const soon = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
   formDialog(`<h2>${esc(a.name)}: close date</h2>
     <p class="muted small mb-3">Currently ${a.deal.closeDate ? new Date(a.deal.closeDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'not set'}. Pick a date you believe in; the forecast uses it.</p>
@@ -381,7 +407,7 @@ function editCloseDate(a, after = () => route({ keepScroll: true })) {
     'Save to HubSpot', (f) => api(`/api/accounts/${a.id}/deal-fields`, { method: 'POST', body: { fields: { closeDate: f.closeDate.value } } }).then(after));
 }
 
-function writeFollowUp(a, draft, after = () => route({ keepScroll: true })) {
+function writeFollowUp(a, draft, after = afterAction) {
   formDialog(`<h2>Follow up with ${esc(a.contact.name)}</h2>
     <div class="field"><label>To</label><div class="input ro">${esc(draft.to)}</div></div>
     <div class="field"><label for="fu-s">Subject</label><input class="input" id="fu-s" name="subject" required value="${esc(draft.subject)}" /></div>
@@ -397,7 +423,7 @@ function runDealCta(a, x, btn) {
   if (c.kind === 'closedate') return editCloseDate(a);
   if (c.kind === 'details') return editDealDetails(a, a.gaps);
   if (c.kind === 'stage') return moveDeal(a, c.to);
-  if (c.kind === 'ask') return run(btn, async () => { await api(`/api/accounts/${a.id}/ask-colleague`, { method: 'POST', body: { wonId: c.wonId } }); route({ keepScroll: true }); });
+  if (c.kind === 'ask') return run(btn, async () => { await api(`/api/accounts/${a.id}/ask-colleague`, { method: 'POST', body: { wonId: c.wonId } }); afterAction(); });
 }
 
 // ---------- pipeline ----------
@@ -585,10 +611,12 @@ function bindBoardDrag(byId) {
       dragging = card.dataset.deal;
       e.dataTransfer.effectAllowed = 'move';
       e.dataTransfer.setData('text/plain', dragging);
+      liftGhost(card, e);
       card.classList.add('dragging');
+      board.classList.add('is-dragging');
       closed.hidden = false;
     });
-    card.addEventListener('dragend', () => { card.classList.remove('dragging'); closed.hidden = true; $$('.drop-on').forEach((x) => x.classList.remove('drop-on')); dragging = null; });
+    card.addEventListener('dragend', () => { card.classList.remove('dragging'); board.classList.remove('is-dragging'); closed.hidden = true; $$('.drop-on').forEach((x) => x.classList.remove('drop-on')); dragging = null; });
     card.addEventListener('click', (e) => { if (!e.target.closest('a, button')) location.hash = `#/accounts/${card.dataset.deal}`; });
     card.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === card) location.hash = `#/accounts/${card.dataset.deal}`; });
   });
@@ -728,7 +756,7 @@ function meetingReady(link, heading, text) {
 }
 
 // "Meet": a call right now, or a scheduled invite. Google Calendar emails it with a Meet link.
-function openMeetDialog(a, after = () => route({ keepScroll: true })) {
+function openMeetDialog(a, after = afterAction) {
   const me = user();
   const team = [...new Set([a.owner, a.csm].filter((n) => n && n !== me.name))];
   const title = me.team === 'support' ? `Quick call: ${a.name}` : me.team === 'cs' ? `Check-in: ${a.name}` : `${a.name} × Frontline`;
@@ -880,7 +908,7 @@ function supportPanel(a) {
             <div class="grow">
               <div class="fw-500">${esc(c.subject)}</div>
               <div class="ii-facts">
-                ${urgency(c) ? `<div class="fact ${urgency(c).tone}"><svg class="ico"><use href="#i-clock"/></svg>${urgency(c).text}</div>` : ''}
+                ${dueTag(c, 'fact', 'div')}
                 <div class="fact"><svg class="ico"><use href="#i-tag"/></svg><span class="k">Classification:</span>${esc(c.classificationLabel)}${c.escalatedTo ? ` <span class="mono info-text">· ${esc(c.escalatedTo)}</span>` : ''}</div>
                 <div class="fact ${c.assignee ? '' : 'warn'}"><svg class="ico"><use href="#i-user"/></svg><span class="k">Owner:</span>${c.assignee ? esc(c.assignee) : 'Unassigned'}</div>
               </div>
@@ -1228,8 +1256,7 @@ function inboxQueue(items, me) {
 function dueCell(i) {
   if (i.state === 'closed') return `<span class="st calm"><svg class="ico"><use href="#i-done"/></svg>Closed: ${esc(reasonLabel(i.closeReason ?? '')) || 'no reason'}</span>`;
   if (isSnoozed(i)) return `<span class="st info"><svg class="ico"><use href="#i-clock"/></svg>Snoozed until ${new Date(i.snoozedUntil).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>`;
-  const u = urgency(i);
-  return u ? `<span class="st ${u.tone}"><svg class="ico"><use href="#i-clock"/></svg>${u.text}</span>` : '<span class="muted">–</span>';
+  return dueTag(i) || '<span class="muted">–</span>';
 }
 
 function renderInbox(selectedId) {
@@ -1359,7 +1386,7 @@ async function renderConversation(id) {
         </div>
       </div>` : ''}
       <div class="ctx">
-        ${urgency(sel) ? `<span class="st ${urgency(sel).tone}"><svg class="ico"><use href="#i-clock"/></svg>${urgency(sel).text}</span>` : ''}
+        ${dueTag(sel)}
         <label class="st calm" for="classify"><svg class="ico"><use href="#i-tag"/></svg>Classification</label>
         ${sel.state === 'open' ? `<select class="input sm" id="classify" title="Correct the classification if it's wrong">
           ${state.meta.classifications.map((k) => { const tool = k.id === 'integration' ? (sel.classification?.tool ?? sel.account.platformErp) : null; return `<option value="${k.id}" ${sel.classification?.id === k.id ? 'selected' : ''}>${esc(k.label)}${tool ? ` · ${esc(tool)}` : ''}</option>`; }).join('')}
@@ -1444,7 +1471,7 @@ const fmtDate = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'sho
 const renewalCell = (a) => (a.renewalDate ? `<span class="${a.renewalDays <= 90 ? 'tone-warn' : ''}" title="in ${a.renewalDays} days">${fmtDate(a.renewalDate)}</span>` : '<span class="muted">–</span>');
 
 // One pop-up per kind of CS action, shared by My portfolio, the Health tab and Good morning.
-function runCsAction(a, x, after = () => route({ keepScroll: true })) {
+function runCsAction(a, x, after = afterAction) {
   const head = `<div class="muted small">${esc(a.name)}</div><h2 class="mt-1">${esc(x.action)}</h2><p class="small mb-3">${esc(x.detail)}</p>`;
   if (x.cta.kind === 'anomaly') {
     return formDialog(`${head}<div class="field"><label for="an-note">What did you find? <span class="muted xs">(optional, saved to HubSpot)</span></label><textarea class="input" id="an-note" name="note" rows="3" placeholder="e.g. NetSuite credentials expired; their IT is fixing it today."></textarea></div>`,
@@ -2037,6 +2064,94 @@ function onKey(e) {
 }
 
 // ---------- router ----------
+// ---------- motion ----------
+// Motion only where it tells you something: what's new, what moved, what changed, what's urgent.
+// Pages re-render as a whole on every live update, so we compare before/after and animate the difference.
+const motion = { busy: false, lastSa: null };
+const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+const replay = (el, cls) => { el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); el.addEventListener('animationend', () => el.classList.remove(cls), { once: true }); };
+const KEYED = 'tr[data-href], .deal[data-deal], .act[data-id], .gm-action[data-key]';
+const keyOf = (el) => el.dataset.href ?? el.dataset.deal ?? el.dataset.id ?? el.dataset.key;
+const COUNTED = '.kpi .v, .metric .v, .hs-num';
+const countKey = (el, i) => `${el.closest('.kpi, .metric')?.firstElementChild?.textContent.trim() ?? 'n'}#${i}`;
+
+function motionSnapshot() {
+  const rows = new Map();
+  $$(KEYED, view).forEach((el) => rows.set(keyOf(el), el.getBoundingClientRect()));
+  const nums = new Map($$(COUNTED, view).map((el, i) => [countKey(el, i), el.textContent.trim()]));
+  return { rows, nums, section: lastSection };
+}
+
+// After a live re-render: glide moved items into place, slide in new ones, count changed numbers.
+function motionAfter(before) {
+  if (!before || before.section !== lastSection || calm()) return;
+  $$(KEYED, view).forEach((el) => {
+    const was = before.rows.get(keyOf(el));
+    if (!was) { el.classList.add('m-new'); return; }
+    const now = el.getBoundingClientRect();
+    const dx = was.left - now.left, dy = was.top - now.top;
+    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+      el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 380, easing: 'cubic-bezier(.2,.8,.2,1)' });
+    }
+  });
+  $$(COUNTED, view).forEach((el, i) => {
+    const old = before.nums.get(countKey(el, i));
+    if (old != null && old !== el.textContent.trim()) countTo(el, old, el.textContent.trim());
+  });
+}
+
+// "$1.2M" → "$1.4M": counts through the numbers when the unit matches, otherwise just highlights.
+function countTo(el, from, to) {
+  const parse = (t) => t.match(/^([^\d-]*)(-?[\d,]*\.?\d+)(.*)$/);
+  const a = parse(from), b = parse(to);
+  replay(el, 'm-changed');
+  if (!a || !b || a[1] !== b[1] || a[3] !== b[3]) return;
+  const x0 = Number(a[2].replace(/,/g, '')), x1 = Number(b[2].replace(/,/g, ''));
+  const dec = (b[2].split('.')[1] ?? '').length;
+  const t0 = performance.now(), dur = 700;
+  const step = (t) => {
+    const k = Math.min(1, (t - t0) / dur), e = 1 - (1 - k) ** 3;
+    el.textContent = `${b[1]}${(x0 + (x1 - x0) * e).toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec })}${b[3]}`;
+    if (k < 1) requestAnimationFrame(step); else el.textContent = to;
+  };
+  requestAnimationFrame(step);
+}
+
+// First view of a page: bars fill, progress pips and sparklines draw in. Not on live refreshes.
+function enterView() {
+  if (calm()) return;
+  view.classList.remove('m-enter'); void view.offsetWidth; view.classList.add('m-enter');
+  clearTimeout(enterView.t);
+  enterView.t = setTimeout(() => view.classList.remove('m-enter'), 1200);
+}
+
+// A suggestion you just acted on checks itself off and folds away, then the page refreshes.
+document.addEventListener('click', (e) => { const sa = e.target.closest('.sa'); if (sa) motion.lastSa = { el: sa, at: Date.now() }; }, true);
+function afterAction() {
+  const sa = motion.lastSa;
+  motion.lastSa = null;
+  if (!sa || !sa.el.isConnected || Date.now() - sa.at > 10 * 60_000 || calm()) return route({ keepScroll: true });
+  motion.busy = true; // hold live refreshes until the card has folded away
+  // Wait a beat so the dialog has closed and the card is visible again
+  setTimeout(() => {
+    sa.el.classList.add('sa-done');
+    $('.sa-go use', sa.el)?.setAttribute('href', '#i-done');
+    setTimeout(() => { motion.busy = false; route({ keepScroll: true }); }, 650);
+  }, 60);
+}
+
+// Dragging a deal: the card you hold is a lifted, slightly tilted copy.
+function liftGhost(card, e) {
+  if (calm() || !e.dataTransfer.setDragImage) return;
+  const r = card.getBoundingClientRect();
+  const ghost = card.cloneNode(true);
+  ghost.classList.add('drag-ghost');
+  ghost.style.width = `${r.width}px`;
+  document.body.append(ghost);
+  e.dataTransfer.setDragImage(ghost, e.clientX - r.left, e.clientY - r.top);
+  setTimeout(() => ghost.remove(), 0);
+}
+
 const TITLES = { home: 'Good morning', pipeline: 'Pipeline', approvals: 'Approvals', inbox: 'Inbox', onboarding: 'Onboarding', portfolio: 'My portfolio', requests: 'Feature requests', accounts: 'Accounts', log: 'Activity log', connections: 'Connections' };
 let lastSection = null;
 
@@ -2064,6 +2179,7 @@ async function route({ keepScroll = false } = {}) {
   const navigated = !keepScroll && lastSection !== `${section}/${id ?? ''}`;
   lastSection = `${section}/${id ?? ''}`;
   // Show a skeleton only if loading is noticeable, so fast pages don't flicker.
+  const before = navigated ? null : motionSnapshot();
   const skel = navigated ? setTimeout(() => { view.innerHTML = SKELETON; }, 150) : null;
   try {
     if (!canSee(section)) renderNoAccess(section);
@@ -2086,6 +2202,8 @@ async function route({ keepScroll = false } = {}) {
   }
   if (keepScroll) scrollTo(0, y);
   else if (navigated) { scrollTo(0, 0); view.focus({ preventScroll: true }); }
+  if (navigated) enterView(); else motionAfter(before);
+  tickDue();
 }
 
 const SKELETON = `<div class="skel" aria-busy="true" aria-label="Loading"><div class="sk sk-title"></div><div class="sk sk-line"></div>
@@ -2112,7 +2230,8 @@ async function init() {
   document.addEventListener('keydown', onKey);
   $('#drawer').addEventListener('click', (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); }); // backdrop
   addEventListener('hashchange', () => { route(); });
-  setInterval(() => { if (/^#\/(inbox|accounts\/)/.test(location.hash)) scheduleRender(); }, 60_000); // reply-due countdowns
+  setInterval(tickDue, 15_000); // reply-due countdowns tick in place
+  setInterval(() => { if (/^#\/inbox\/?$/.test(location.hash)) scheduleRender(); }, 60_000); // and the queue re-sorts each minute
   connectEvents();
   refreshBadges();
   await route();

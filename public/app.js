@@ -1965,20 +1965,37 @@ async function renderLog(query = new URLSearchParams()) {
 }
 
 // ---------- connections ----------
+// How to connect a system, step by step (ORIGIN becomes this site's address).
+const SETUP = {
+  slack: [
+    'Create an app at <a class="link" href="https://api.slack.com/apps" target="_blank" rel="noopener">api.slack.com/apps</a> → <b>From scratch</b>, in your workspace.',
+    '<b>OAuth &amp; Permissions</b> → Bot Token Scopes: <code>chat:write</code>, <code>chat:write.public</code>, <code>channels:manage</code>, <code>channels:write.invites</code>, <code>im:write</code>. Then <b>Install to Workspace</b>.',
+    'Render → Environment: <code>SLACK_BOT_TOKEN</code> (starts with xoxb-, from OAuth &amp; Permissions), <code>SLACK_SIGNING_SECRET</code> (Basic Information), and <code>SLACK_DM_USER_ID</code> = your member ID (Slack → your profile → ⋯ → Copy member ID). Every DM then comes to you.',
+    'Create <code>#deals</code>, <code>#deal-desk</code> and <code>#support-escalations</code> in Slack (or set <code>SLACK_CHANNEL_DEALS</code>, <code>SLACK_CHANNEL_DEAL_DESK</code>, <code>SLACK_CHANNEL_SUPPORT</code> to other channels).',
+    'For the Approve / Reject buttons: <b>Interactivity &amp; Shortcuts</b> → On, Request URL <code>ORIGIN/webhooks/slack</code>. Set <code>SLACK_APPROVER_IDS</code> to your member ID.',
+    'Set <code>PUBLIC_URL</code> to <code>ORIGIN</code> so "Open in Frontline Hub" links in Slack work. Save; Render restarts the hub. Then click <b>Test connection</b> here.',
+  ],
+};
+
 function renderConnections() {
   const origin = location.origin;
+  const steps = (id) => (SETUP[id] ? `<details class="conn-setup"><summary class="link small">How to connect</summary><ol class="small">${SETUP[id].map((x) => `<li>${x.replaceAll('ORIGIN', esc(origin))}</li>`).join('')}</ol></details>` : '');
   view.innerHTML = `
     <div class="page-head">
       <div><h1>Connections</h1><p class="muted">Systems without credentials run in <b>mock</b> mode: every request is built exactly as the real API expects, but never leaves the server.</p></div>
       <button class="btn danger" id="reset">${icon('i-reset')}Reset demo data</button>
     </div>
+    <div class="card callout conn-safety">${icon('i-alert')}<div class="grow small"><b>Demo safety.</b> With Slack live, every direct message goes to <code>SLACK_DM_USER_ID</code> (you), labelled with who it was for. The sample team's Slack IDs are made up and are never messaged.</div></div>
     <div class="conn-grid">
       ${state.meta.integrations.map((i) => `
         <div class="card conn">
           <div class="row"><span class="logo" style="background:${SYSTEMS[i.id].color}">${SYSTEMS[i.id].letter}</span>
             <div class="grow"><strong>${esc(i.name)}</strong><div class="muted xs">${esc(i.role)}</div></div>
             <span class="chip ${i.live ? 'good' : 'warn'}">${i.live ? 'Live' : 'Mock'}</span></div>
+          ${(i.notes ?? []).map((n) => `<div class="small">${esc(n)}</div>`).join('')}
           <div class="mono muted xs">${i.env.map(esc).join('<br>')}</div>
+          ${i.testable ? `<div class="row gap-1"><button class="btn sm" data-test="${esc(i.id)}">Test connection</button></div><div class="conn-result small" hidden></div>` : ''}
+          ${steps(i.id)}
         </div>`).join('')}
     </div>
     <div class="card card-pad mt-4">
@@ -1988,6 +2005,11 @@ function renderConnections() {
 POST ${esc(origin)}/webhooks/slack      # Slack app → Interactivity request URL (approval buttons)
 POST ${esc(origin)}/webhooks/jira       # Jira: issue updated (feature request status)</pre>
     </div>`;
+  $$('[data-test]').forEach((b) => b.addEventListener('click', () => run(b, async () => {
+    const r = await api(`/api/connections/${b.dataset.test}/test`, { method: 'POST' });
+    const el = $('.conn-result', b.closest('.conn'));
+    el.hidden = false; el.className = `conn-result small ${r.ok ? 'tone-good' : 'tone-bad'}`; el.textContent = r.message;
+  })));
   $('#reset').addEventListener('click', async (e) => {
     const btn = e.currentTarget;
     if (!(await confirmDialog({ title: 'Reset demo data?', body: '<p class="muted">Every account, conversation and approval goes back to the starting point for everyone using this link.</p>', confirmLabel: 'Reset', danger: true }))) return;

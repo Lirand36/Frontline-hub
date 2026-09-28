@@ -922,3 +922,10 @@ a.sa { text-decoration: none; }
   .ops-row.l-bad td:first-child::before, .ops-row.l-warn td:first-child::before { left: -16px; }
   .ops-table .group-row, .ops-table .group-row th, .ops-table tr.sa-row, .ops-table tr.sa-row td { display: block; }
 }
+
+/* ---------- connections: setup steps and safety note ---------- */
+.conn-setup summary { cursor: pointer; }
+.conn-setup ol { margin: var(--s-2) 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.conn-setup code, .conn-safety code { font-family: var(--mono); font-size: var(--fs-xs); background: var(--surface-2); padding: 1px 4px; border-radius: var(--r-sm); }
+.conn-safety { align-items: flex-start; }
+.conn-safety > .ico { color: var(--warn); margin-top: 2px; }

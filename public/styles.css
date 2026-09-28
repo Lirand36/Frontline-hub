@@ -833,3 +833,46 @@ details.onb-card[open] .onb-toggle { visibility: hidden; }
   .t-close { padding: 9px; }
   .check { width: 28px; height: 28px; }
 }
+
+/* ---------- motion: only where it tells you something (all of it off under prefers-reduced-motion) ---------- */
+/* New since the last refresh: slides in and glows once */
+.m-new { animation: m-in .35s cubic-bezier(.2, .8, .2, 1) both; }
+tr.m-new > td, .gm-action.m-new, .act.m-new > summary, .deal.m-new { animation: m-glow 2.2s ease-out both; }
+@keyframes m-in { from { opacity: 0; transform: translateY(-6px); } }
+@keyframes m-glow { from { background-color: color-mix(in srgb, var(--brand) 16%, var(--surface)); } }
+
+/* A number that just changed */
+.m-changed { animation: m-changed 1.2s ease-out; }
+@keyframes m-changed { from { color: var(--brand-ink); } }
+
+/* Sidebar badge went up */
+.badge.bump { animation: bump .45s cubic-bezier(.3, 1.6, .5, 1); }
+@keyframes bump { 40% { transform: scale(1.35); } }
+
+/* First view of a page: bars fill, pips light up in order, sparklines draw left to right */
+.m-enter .bar > span { animation: fill .7s cubic-bezier(.2, .8, .2, 1) both; transform-origin: left; }
+@keyframes fill { from { transform: scaleX(0); } }
+.m-enter .pip.on { animation: fill .35s ease-out both; transform-origin: left; }
+.m-enter .pip.on:nth-child(2) { animation-delay: .06s; } .m-enter .pip.on:nth-child(3) { animation-delay: .12s; }
+.m-enter .pip.on:nth-child(4) { animation-delay: .18s; } .m-enter .pip.on:nth-child(5) { animation-delay: .24s; }
+.m-enter .pip.on:nth-child(6) { animation-delay: .3s; } .m-enter .pip.on:nth-child(n+7) { animation-delay: .36s; }
+.m-enter .fr-dots span.on { animation: fill .3s ease-out both; transform-origin: left; }
+.m-enter .spark[data-draw] { animation: draw .9s cubic-bezier(.3, .7, .3, 1) both; }
+@keyframes draw { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+
+/* Reply due within 15 minutes: the clock pulses gently (overdue stays steady red) */
+[data-due].soon .ico { animation: due-pulse 1.4s ease-in-out infinite; }
+@keyframes due-pulse { 50% { transform: scale(1.25); opacity: .55; } }
+
+/* A suggestion you acted on: checks off, then folds away */
+.sa.sa-done { --edge: var(--good); border-color: var(--good); background: var(--good-soft); pointer-events: none; animation: sa-fold .35s .3s ease-in forwards; }
+.sa.sa-done .sa-go { color: var(--good); transform: none; }
+@keyframes sa-fold { to { opacity: 0; transform: scale(.97); } }
+
+/* Pipeline board: cards lift on hover, columns hint where you can drop */
+.deal { transition: box-shadow .15s ease, transform .15s ease, border-color .15s ease; }
+.deal:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(15, 20, 27, .08); }
+.deal.dragging { opacity: .35; transform: none; box-shadow: none; border-style: dashed; }
+.col { transition: background-color .15s ease, box-shadow .15s ease; }
+.is-dragging .col { box-shadow: inset 0 0 0 1px var(--border-strong); }
+.drag-ghost { position: fixed; top: -1000px; left: -1000px; transform: rotate(2deg); box-shadow: 0 14px 34px rgba(15, 20, 27, .22); border-color: var(--brand); pointer-events: none; }

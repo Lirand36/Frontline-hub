@@ -2005,6 +2005,8 @@ async function renderOps() {
   const d = await api('/api/ops');
   state.opsOpen ??= new Set();
   state.opsView ??= 'open';
+  // Sections you closed stay closed on this device
+  if (!state.opsHidden) { try { state.opsHidden = new Set(JSON.parse(localStorage.getItem('frontline-hub-ops-hidden') || '[]')); } catch { state.opsHidden = new Set(); } }
   const n = (lvl) => d.checks.filter((c) => c.level === lvl).length;
   const shown = d.checks.filter((c) => state.opsView === 'all' || c.level !== 'ok');
   const groups = [...new Set(d.checks.map((c) => c.group))];
@@ -2045,12 +2047,29 @@ async function renderOps() {
     <div class="card table-wrap">
       <table class="table ops-table">
         <thead><tr><th>Check</th><th>Status</th><th class="center-col">Items</th><th class="hide-sm">Oldest</th><th class="hide-sm">Team</th></tr></thead>
-        ${groups.map((g) => { const rows = shown.filter((c) => c.group === g); return rows.length ? `<tbody><tr class="group-row"><th colspan="5">${esc(g)}</th></tr>${rows.map(row).join('')}</tbody>` : ''; }).join('')
+        ${groups.map((g) => {
+          const rows = shown.filter((c) => c.group === g);
+          if (!rows.length) return '';
+          const hidden = state.opsHidden.has(g);
+          const open = rows.filter((c) => c.level !== 'ok').length;
+          const worst = rows.some((c) => c.level === 'bad') ? 'bad' : open ? 'warn' : 'good';
+          const summary = open ? `${open} open ${open === 1 ? 'issue' : 'issues'}` : 'All clear';
+          return `<tbody><tr class="group-row"><th colspan="5"><div class="spread">
+              <span>${esc(g)}${hidden ? ` <span class="xs tone-${worst} fw-500">· ${summary}</span>` : ''}</span>
+              <button class="sa-more" data-opsgroup="${esc(g)}" aria-expanded="${!hidden}">${hidden ? 'Show' : 'Hide'}</button></div></th></tr>
+            ${hidden ? '' : rows.map(row).join('')}</tbody>`;
+        }).join('')
           || `<tbody><tr><td colspan="5" class="empty">Nothing open. All ${d.checks.length} checks are clear.</td></tr></tbody>`}
       </table>
     </div>`;
 
   $$('[data-opsview]').forEach((b) => b.addEventListener('click', () => { state.opsView = b.dataset.opsview; renderOps(); }));
+  $$('[data-opsgroup]').forEach((b) => b.addEventListener('click', () => {
+    const g = b.dataset.opsgroup;
+    if (state.opsHidden.has(g)) state.opsHidden.delete(g); else state.opsHidden.add(g);
+    try { localStorage.setItem('frontline-hub-ops-hidden', JSON.stringify([...state.opsHidden])); } catch { /* per-device convenience only */ }
+    renderOps().then(() => $(`[data-opsgroup="${g}"]`)?.focus());
+  }));
   $$('[data-opsexpand]').forEach((b) => b.addEventListener('click', () => {
     const id = b.dataset.opsexpand;
     if (state.opsOpen.has(id)) state.opsOpen.delete(id); else state.opsOpen.add(id);

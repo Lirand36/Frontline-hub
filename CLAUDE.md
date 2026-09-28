@@ -11,14 +11,14 @@ An internal workspace for Sales, Support and Customer Success. The UI is plain J
 - Before calling a feature done, work through the checklist at the bottom.
 
 ## The look: "Ledger"
-Precise and editorial, like a well-set report. Aim for print, not a generic SaaS dashboard.
+Precise and editorial, like a well-set report. One type family (Google Sans), with numbers in its monospace cut. Aim for print, not a generic SaaS dashboard.
 - **Surface:** warm paper, ink text and hairline rules. No shadows except on things that float (dialogs, menus, toasts). Corners are nearly square.
-- **Fonts, only these three:**
-  - `--font-display` (Instrument Serif) for page titles, the wordmark, dialog titles and section rows in tables.
+- **Fonts, only these tokens:**
+  - `--font-display` (Google Sans Flex, set large, tight and medium weight) for page titles, the wordmark, dialog titles and section rows in tables.
   - `--font` (Google Sans Flex) for all text.
   - `--mono` (Google Sans Code) for money, counts and small-caps labels (table headers, stage names).
 - **One accent:** deep green means "act here" (primary buttons, links, next steps). Red and amber are only for problems.
-- **A page opens with a sentence, not number cards.** Under the serif `h1`, one `.dek` sentence weaves the key numbers in with `dn(value, tone)`, e.g. "$1.2M open across 10 deals; 2 close dates have passed…". Where separate figures read better (Good morning, an account's Support tab), use `figures([...])`: a slim row with hairlines, no boxes. Don't build rows of number cards.
+- **A page opens with a sentence, not number cards.** Under the large `h1`, one `.dek` sentence weaves the key numbers in with `dn(value, tone)`, e.g. "$1.2M open across 10 deals; 2 close dates have passed…". Where separate figures read better (Good morning, an account's Support tab), use `figures([...])`: a slim row with hairlines, no boxes. Don't build rows of number cards.
 - **People** show as `person(name)`: an initials avatar in a stable tint, then the name. Use it wherever a column is a person (owner, CSM, requester).
 - **Details beside a list:** on the Pipeline board, clicking a deal opens a side panel (`dealPanel`) with the facts, all suggested actions and recent activity. The name still links to the account. On screens under 1360px it slides over the board. Reuse this pattern for other boards and lists that need "look before you open".
 
@@ -35,7 +35,7 @@ Precise and editorial, like a well-set report. Aim for print, not a generic SaaS
 
 ## Page structure (copy an existing page)
 1. `.page-head` (ends with a solid ink rule):
-   - Left side: the serif `h1`, then the page's state as a `.dek` sentence. Pages without numbers keep one muted line describing the page.
+   - Left side: the large `h1`, then the page's state as a `.dek` sentence. Pages without numbers keep one muted line describing the page.
    - Right side, top-right: the controls, meaning a `segButtons` filter (shown as underlined text) or a `.btn`.
 2. Optional `figures([...])` when separate numbers read better than a sentence.
 3. The list itself is **a table, not cards**: `.card.table-wrap > table.table`.

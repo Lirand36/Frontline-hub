@@ -276,11 +276,11 @@ export async function requestMoveBack(accountId, { to, reason, note }, actor) {
   const open = db.moveRequests.find((r) => r.accountId === a.id && r.status === 'pending');
   need(!open, 409, `${open?.by} already asked to move ${a.name} back to ${stageLabel(open?.to)}. The admin will decide soon.`);
   const r = { id: `mv_${Date.now()}`, accountId: a.id, from: a.deal.stage, to, reason, note, by: actor, at: now(), status: 'pending' };
+  // The admin can decide right in Slack (buttons post back to /webhooks/slack) or in the hub
   for (const ad of admins()) {
-    failIfRejected(await slack.dm(ad.slackId, ad.name, `Move-back request: ${a.name}`, [
-      slack.section(`:leftwards_arrow_with_hook: *${actor} asks to move ${a.name} back* from ${stageLabel(r.from)} to *${stageLabel(to)}*\n*Reason:* ${reasonText(reason, note)}`),
-      slack.context(`<${hubUrl('/home')}|Approve or decline in Frontline Hub>`),
-    ]));
+    const msg = await slack.dm(ad.slackId, ad.name, `Move-back request: ${a.name}`, moveBackBlocks(a, r));
+    failIfRejected(msg);
+    r.slack ??= { channel: msg.response.channel, ts: msg.response.ts };
   }
   db.moveRequests.unshift(r);
   await track('deal.move_back_requested', a.id, actor, { from: r.from, to, reason });
@@ -289,7 +289,26 @@ export async function requestMoveBack(accountId, { to, reason, note }, actor) {
   return { request: r };
 }
 
-export async function decideMoveBack(id, decision, actor) {
+function moveBackBlocks(a, r) {
+  return [
+    slack.section(`:leftwards_arrow_with_hook: *${r.by} asks to move ${a.name} back* from ${stageLabel(r.from)} to *${stageLabel(r.to)}*\n*Reason:* ${reasonText(r.reason, r.note)}`),
+    slack.buttons([
+      { text: `Move it back to ${stageLabel(r.to)}`, actionId: 'moveback_approve', value: r.id, style: 'primary' },
+      { text: 'Decline', actionId: 'moveback_decline', value: r.id },
+    ]),
+    slack.context(`<${hubUrl('/home')}|Or decide in Frontline Hub>`),
+  ];
+}
+// Replace the buttons with the outcome, so the Slack message shows what was decided (from Slack or the hub)
+async function closeMoveBackMessage(a, r, text, via) {
+  if (!r.slack) return;
+  await slack.updateMessage(r.slack.channel, r.slack.ts, `Move-back ${r.status}: ${a.name}`, [
+    slack.section(text),
+    slack.context(`Requested by ${r.by} · decided ${via === 'slack' ? 'in Slack' : 'in Frontline Hub'}`),
+  ]);
+}
+
+export async function decideMoveBack(id, decision, actor, via = 'hub') {
   const r = db.moveRequests.find((x) => x.id === id);
   need(r, 404, 'Request not found');
   need(r.status === 'pending', 409, `Already ${r.status}`);
@@ -299,12 +318,16 @@ export async function decideMoveBack(id, decision, actor) {
   if (decision === 'approved') {
     if (a.deal.stage !== r.from) {
       r.status = 'outdated';
+      await closeMoveBackMessage(a, r, `:information_source: ${a.name} is in ${stageLabel(a.deal.stage)} now, so this request no longer applies.`, via);
       changed(a.id);
       throw new HttpError(409, `${a.name} is in ${stageLabel(a.deal.stage)} now, not ${stageLabel(r.from)}, so this request no longer applies.`);
     }
     await changeDealStage(a.id, r.to, actor, {}, 'UTC', { reason: r.reason, note: [r.note, `requested by ${r.by}`].filter(Boolean).join(' · ') });
   }
-  Object.assign(r, { status: decision, decidedBy: actor, decidedAt: now() });
+  Object.assign(r, { status: decision, decidedBy: actor, decidedAt: now(), via });
+  await closeMoveBackMessage(a, r, decision === 'approved'
+    ? `:white_check_mark: *${a.name}* moved back to ${stageLabel(r.to)} by ${actor}.`
+    : `:x: ${actor} kept *${a.name}* in ${stageLabel(r.from)}.`, via);
   const rep = USERS.find((u) => u.name === r.by);
   if (rep?.slackId) await slack.dm(rep.slackId, rep.name, `Move-back ${decision}: ${a.name}`, [
     slack.section(decision === 'approved' ? `:white_check_mark: ${actor} moved *${a.name}* back to ${stageLabel(r.to)}.` : `:x: ${actor} kept *${a.name}* in ${stageLabel(r.from)}. Reach out to them if you think it should move back.`),

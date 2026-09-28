@@ -285,6 +285,20 @@ async function handleWebhook(req, res, source) {
     // Only listed Slack users may approve (comma-separated Slack user IDs). Unset = demo mode.
     const allowed = (process.env.SLACK_APPROVER_IDS || '').split(',').map((x) => x.trim()).filter(Boolean);
     if (allowed.length && !allowed.includes(payload.user?.id)) throw new svc.HttpError(403, 'Not an approver');
+    // Move-back requests go to the admin; a click in Slack acts as the hub's admin
+    if (action.action_id?.startsWith('moveback_')) {
+      const admin = USERS.find((u) => u.access === 'admin').name;
+      setActor(`${admin} (in Slack)`);
+      const decision = action.action_id === 'moveback_approve' ? 'approved' : 'declined';
+      try {
+        const result = await svc.decideMoveBack(action.value, decision, admin, 'slack');
+        return json(res, 200, { ok: true, status: result.request.status });
+      } catch (err) {
+        // Already decided, or the deal moved on: Slack gets a 200 so it doesn't show a failure; the message was updated
+        if (err.status && err.status < 500) return json(res, 200, { ok: false, error: err.message });
+        throw err;
+      }
+    }
     const who = payload.user?.name || USERS.find((u) => u.approver).name;
     setActor(`${who} (in Slack)`);
     const decision = action.action_id === 'discount_approve' ? 'approved' : 'rejected';

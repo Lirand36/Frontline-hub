@@ -93,6 +93,14 @@ function tickDue() {
 
 // Line icon from the sprite in index.html (names start with i-); anything else is shown as text.
 const icon = (name, cls = '') => (String(name ?? '').startsWith('i-') ? `<svg class="ico ${cls}" aria-hidden="true"><use href="#${esc(name)}"/></svg>` : esc(name ?? ''));
+// Ledger: a page opens with one sentence where the numbers are woven in, instead of a row of number cards.
+const dn = (v, tone = '') => `<span class="dn ${tone ? `tone-${tone}` : ''}">${v}</span>`;
+const count = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+// Where separate figures read better than a sentence (Good morning, an account's Support tab): a slim row, hairline between.
+const figures = (items) => `<div class="figures">${items.map((k) => `<div class="fig"><div class="fig-l">${esc(k.label)}</div><div class="v num ${k.tone ? `tone-${k.tone}` : ''}">${esc(k.value)}</div>${k.sub ? `<div class="muted xs">${esc(k.sub)}</div>` : ''}</div>`).join('')}</div>`;
+// A person's initials in a small colored circle; the color stays the same for a name everywhere.
+const avatar = (name, size = 'xs') => (name ? `<span class="avatar ${size} av-${[...name].reduce((n, c) => n + c.charCodeAt(0), 0) % 5}" aria-hidden="true">${esc(initials(name))}</span>` : '');
+const person = (name) => `<span class="person">${avatar(name)}${esc(name)}</span>`;
 const segBadge = (seg) => (seg === 'Enterprise' ? '<span class="seg-badge" title="Enterprise customer">Enterprise</span>' : '');
 
 function confirmEscalate() {
@@ -253,14 +261,12 @@ async function renderHome() {
       <div class="grow">
         <div class="muted small">${today}</div>
         <h1>Good morning, ${esc(first)}</h1>
-        <p class="gm-summary">${esc(d.summary)}</p>
+        <p class="dek">${esc(d.summary)}</p>
       </div>
       <span class="chip gm-role">${esc(d.user.role)}</span>
     </section>
 
-    <div class="kpis">
-      ${d.kpis.map((k) => `<div class="card kpi"><div class="muted small">${esc(k.label)}</div><div class="v num ${k.tone ? `tone-${k.tone}` : ''}">${esc(k.value)}</div></div>`).join('')}
-    </div>
+    ${figures(d.kpis)}
 
     <div class="spread mb-3">
       <h2>Your next suggested actions <span class="muted fw-500">· ${d.actions.length}</span></h2>
@@ -599,6 +605,39 @@ const PL_COLS = [
   { id: 'next', label: 'Next suggested action', key: (a) => PRIORITY_RANK[a.next?.priority ?? 'low'] * 1e9 - a.deal.amount },
 ];
 
+// The selected deal, beside the board: the facts, every suggested action, and what happened lately.
+function dealPanel(a) {
+  const inStage = a.deal.stageEnteredAt ? days(a.deal.stageEnteredAt) : null;
+  const late = a.deal.closeDate && new Date(a.deal.closeDate) < new Date();
+  const acts = (a.deal.activities ?? []).slice(0, 4);
+  const list = suggestions(a);
+  return `<aside class="pl-panel card" aria-label="${esc(a.name)} details">
+    <div class="pp-head"><div class="pp-stage">${esc(stageName(a.deal.stage))}</div><button class="icon-close" data-panel-close aria-label="Close">${icon('i-x')}</button></div>
+    <h2 class="pp-name">${esc(a.name)}</h2>
+    <div class="muted small"><span class="num">${moneyCompact(a.deal.amount)}</span> ARR · ${count(a.properties, 'property', 'properties')}</div>
+    <dl class="kv pp-kv">
+      <dt>Owner</dt><dd>${person(a.owner)}</dd>
+      <dt>Close date</dt><dd class="${late ? 'tone-bad' : ''}">${a.deal.closeDate ? `${fmtDay(a.deal.closeDate)}${late ? ' · passed' : ''}` : '–'}</dd>
+      <dt>Last reply</dt><dd>${a.lastReplyAt ? relText(a.lastReplyAt) : 'No reply yet'}</dd>
+      ${inStage != null ? `<dt>In stage</dt><dd>${count(inStage, 'day')}</dd>` : ''}
+      <dt>Contact</dt><dd>${esc(a.contact?.name ?? '–')}${a.contact?.role ? `<div class="muted xs">${esc(a.contact.role)}</div>` : ''}</dd>
+    </dl>
+    <div class="pp-sec">Next suggested action${list.length === 1 ? '' : 's'}</div>
+    ${list.length ? `<div class="sa-list">${list.map((x) => saCard(a, x)).join('')}</div>` : '<p class="muted small">Nothing to do right now.</p>'}
+    ${acts.length ? `<div class="pp-sec">Recent activity</div><ul class="pp-acts">${acts.map((x) => `<li><span class="num muted">${fmtDay(x.at)}</span><span>${esc(x.subject)}<span class="muted xs"> · ${x.dir === 'in' ? 'from them' : 'from us'}</span></span></li>`).join('')}</ul>` : ''}
+    <a class="btn sm mt-3" href="#/accounts/${esc(a.id)}">Open the account${icon('i-arrow')}</a>
+  </aside>`;
+}
+
+function plSentence(deals, soon, quiet, team) {
+  const total = deals.reduce((x, a) => x + a.deal.amount, 0);
+  const overdue = deals.filter((a) => a.signals.some((x) => x.type === 'overdue')).length;
+  return `${dn(moneyCompact(total))} open across ${team ? '' : 'your '}${count(deals.length, 'deal')}. `
+    + `${dn(moneyCompact(soon.reduce((x, a) => x + a.deal.amount, 0)))} is set to close in the next 30 days; `
+    + `${overdue ? `${dn(overdue, 'bad')} ${overdue === 1 ? 'close date has' : 'close dates have'} passed` : 'no close date has passed'} and `
+    + `${quiet.length ? `${dn(quiet.length, 'warn')} ${quiet.length === 1 ? 'prospect has' : 'prospects have'} gone quiet` : 'no prospect has gone quiet'}.`;
+}
+
 async function renderPipeline(query = new URLSearchParams()) {
   const me = user();
   state.plOpen ??= new Set();
@@ -612,13 +651,14 @@ async function renderPipeline(query = new URLSearchParams()) {
   const total = deals.reduce((s, a) => s + a.deal.amount, 0);
   const soon = deals.filter((a) => a.deal.closeDate && new Date(a.deal.closeDate) >= new Date() && new Date(a.deal.closeDate) - Date.now() < 30 * 86400000);
   const quiet = deals.filter((a) => a.signals.some((x) => x.type === 'silent'));
+  const selDeal = deals.find((a) => a.id === state.plSel) ?? null;
   const cols = PL_COLS.filter((c) => !c.team || team);
   const col = PL_COLS.find((c) => c.id === state.plSort.id) ?? PL_COLS.at(-1);
   const sorted = [...deals].sort((x, y) => { const p = col.key(x), q = col.key(y); return (p < q ? -1 : p > q ? 1 : 0) * state.plSort.dir; });
 
   view.innerHTML = `
     <div class="page-head">
-      <div><h1>Pipeline</h1><p class="muted">${team ? 'Open deals across the team' : 'Your open deals'} and what each one needs next. Synced with HubSpot.</p></div>
+      <div><h1>Pipeline</h1><p class="dek">${plSentence(deals, soon, quiet, team)}</p></div>
       <div class="row">
         ${can('pipeline.team') ? `<div class="seg seg-inline" role="group" aria-label="Whose deals">
           <button class="${!team ? 'sel' : ''}" data-plscope="mine" aria-pressed="${!team}">Mine</button>
@@ -630,24 +670,19 @@ async function renderPipeline(query = new URLSearchParams()) {
         </div>
       </div>
     </div>
-    <div class="kpis">
-      <div class="card kpi"><div class="muted small">Open pipeline (ARR)</div><div class="v num">${moneyCompact(total)}</div><div class="muted xs">${deals.length} ${deals.length === 1 ? 'deal' : 'deals'}</div></div>
-      <div class="card kpi"><div class="muted small">Closing in 30 days</div><div class="v num">${moneyCompact(soon.reduce((s, a) => s + a.deal.amount, 0))}</div><div class="muted xs">${soon.length} ${soon.length === 1 ? 'deal' : 'deals'}</div></div>
-      <div class="card kpi"><div class="muted small">Gone quiet (${state.meta.silentDays.flag}+ days)</div><div class="v num ${quiet.length ? 'tone-warn' : ''}">${quiet.length}</div><div class="muted xs">${moneyCompact(quiet.reduce((s, a) => s + a.deal.amount, 0))} at stake</div></div>
-      <div class="card kpi"><div class="muted small">Close date passed</div><div class="v num ${deals.some((a) => a.signals.some((x) => x.type === 'overdue')) ? 'tone-bad' : ''}">${deals.filter((a) => a.signals.some((x) => x.type === 'overdue')).length}</div></div>
-    </div>
 
     ${viewMode === 'board' ? `
+    <div class="pl-layout ${selDeal ? 'with-panel' : ''}"><div class="grow">
     <div class="board board5" id="board">
       ${OPEN_STAGES().map((s) => {
         const items = deals.filter((a) => a.deal.stage === s.id).sort((x, y) => y.deal.amount - x.deal.amount);
         return `<div class="col" data-drop="${s.id}" aria-label="${esc(s.label)}">
           <div class="col-head"><span>${esc(s.label)}</span><span class="muted num">${items.length} · ${moneyCompact(items.reduce((x, a) => x + a.deal.amount, 0))}</span></div>
           ${items.map((a) => `
-            <article class="deal" draggable="true" data-deal="${esc(a.id)}" tabindex="0" aria-label="${esc(a.name)}, ${esc(s.label)}">
-              <div class="spread items-start"><a class="name" href="#/accounts/${esc(a.id)}">${esc(a.name)}</a>${a.pendingApproval ? '<span class="chip warn" title="Discount waiting for approval">Approval</span>' : ''}${a.moveBackRequest ? `<span class="chip info" title="${esc(a.moveBackRequest.by)} asked the admin to move it back to ${esc(stageName(a.moveBackRequest.to))}">Move back asked</span>` : ''}</div>
-              <div class="muted xs">${moneyCompact(a.deal.amount)} ARR · ${a.properties} ${a.properties === 1 ? 'property' : 'properties'}${team ? ` · ${esc(a.owner)}` : ''}</div>
-              <div class="xs deal-meta"><span>${a.deal.closeDate ? `Closes ${closeCell(a)}` : ''}</span><span>Reply ${replyCell(a)}</span></div>
+            <article class="deal ${state.plSel === a.id ? 'sel' : ''}" draggable="true" data-deal="${esc(a.id)}" tabindex="0" aria-label="${esc(a.name)}, ${esc(s.label)}" aria-current="${state.plSel === a.id}">
+              <div class="spread items-start"><a class="name" href="#/accounts/${esc(a.id)}">${esc(a.name)}</a><span class="num deal-amt">${moneyCompact(a.deal.amount)}</span></div>
+              <div class="deal-meta xs">${avatar(a.owner)}<span>${esc(a.owner)} · ${a.deal.closeDate ? `closes ${closeCell(a)}` : 'no close date'} · ${a.lastReplyAt ? `replied ${replyCell(a)}` : 'no reply yet'}</span></div>
+              <div class="deal-flags">${a.pendingApproval ? '<span class="chip warn" title="Discount waiting for approval">Approval</span>' : ''}${a.moveBackRequest ? `<span class="chip info" title="${esc(a.moveBackRequest.by)} asked the admin to move it back to ${esc(stageName(a.moveBackRequest.to))}">Move back asked</span>` : ''}</div>
               <div class="deal-sa">${saCell(a)}${state.plOpen?.has(a.id) ? `<div class="sa-list">${suggestions(a).slice(1).map((x) => saCard(a, x)).join('')}</div>` : ''}</div>
             </article>`).join('') || '<div class="muted xs col-empty">No deals</div>'}
         </div>`;
@@ -657,7 +692,8 @@ async function renderPipeline(query = new URLSearchParams()) {
       <div class="dz won" data-drop="closedwon">Drop to close won</div>
       <div class="dz lost" data-drop="closedlost">Drop to mark lost</div>
     </div>
-    <p class="muted xs mt-2">Drag a deal to move it. If the next stage needs details (like the demo date and Solutions Engineer), you'll be asked for them first.</p>` : `
+    <p class="muted xs mt-2">Click a deal to see it here; drag it to move it. If the next stage needs details (like the demo date and Solutions Engineer), you'll be asked for them first.</p>
+    </div>${selDeal ? dealPanel(selDeal) : ''}</div>` : `
     <div class="card table-wrap">
       <table class="table pl-table">
         <thead><tr>${cols.map((c) => {
@@ -670,7 +706,7 @@ async function renderPipeline(query = new URLSearchParams()) {
             <td data-label="Stage"><select class="input sm" data-move="${esc(a.id)}" aria-label="Stage for ${esc(a.name)}">${state.meta.stages.map((s) => `<option value="${s.id}" ${s.id === a.deal.stage ? 'selected' : ''}>${esc(s.label)}</option>`).join('')}</select>${a.daysInStage != null ? `<div class="muted xs">${a.daysInStage}d in stage</div>` : ''}</td>
             <td data-label="ARR" class="num num-col">${money(a.deal.amount)}</td>
             <td data-label="Close date" class="small">${closeCell(a)}</td>
-            ${team ? `<td data-label="Owner" class="small">${esc(a.owner)}</td>` : ''}
+            ${team ? `<td data-label="Owner" class="small">${person(a.owner)}</td>` : ''}
             <td data-label="Last reply" class="small">${replyCell(a)}</td>
             <td data-label="Next suggested action" class="pl-next">${saCell(a)}</td>
           </tr>${state.plOpen?.has(a.id) && suggestions(a).length > 1 ? `
@@ -711,6 +747,7 @@ async function renderPipeline(query = new URLSearchParams()) {
     moveDeal(a, to);
   }));
   bindBoardDrag(byId);
+  $('[data-panel-close]')?.addEventListener('click', () => { state.plSel = null; renderPipeline(); });
 
   // Deep links from Good morning: #/pipeline?do=followup&deal=lakeview
   const target = byId[query.get('deal')];
@@ -739,8 +776,9 @@ function bindBoardDrag(byId) {
       closed.hidden = false;
     });
     card.addEventListener('dragend', () => { card.classList.remove('dragging'); board.classList.remove('is-dragging'); closed.hidden = true; $$('.drop-on').forEach((x) => x.classList.remove('drop-on')); dragging = null; });
-    card.addEventListener('click', (e) => { if (!e.target.closest('a, button')) location.hash = `#/accounts/${card.dataset.deal}`; });
-    card.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === card) location.hash = `#/accounts/${card.dataset.deal}`; });
+    const select = () => { state.plSel = state.plSel === card.dataset.deal ? null : card.dataset.deal; renderPipeline().then(() => $(`.deal[data-deal="${card.dataset.deal}"]`)?.focus()); };
+    card.addEventListener('click', (e) => { if (!e.target.closest('a, button')) select(); });
+    card.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === card) select(); if (e.key === 'Escape' && state.plSel) { state.plSel = null; renderPipeline(); } });
   });
   $$('[data-drop]').forEach((zone) => {
     zone.addEventListener('dragover', (e) => { if (!dragging) return; e.preventDefault(); zone.classList.add('drop-on'); });
@@ -1017,11 +1055,11 @@ function supportPanel(a) {
   const closed = a.conversationsView.filter((c) => c.state === 'closed');
   const bugs = a.tickets.filter((t) => t.status !== 'Done');
   return `
-    <div class="kpis kpis-3">
-      <div class="card kpi"><div class="muted small">Open conversations</div><div class="v num">${a.support.open}</div></div>
-      <div class="card kpi"><div class="muted small">With engineering</div><div class="v num ${a.support.escalated ? 'tone-warn' : ''}">${a.support.escalated}</div></div>
-      <div class="card kpi"><div class="muted small">Overdue replies</div><div class="v num ${a.support.overdue ? 'tone-bad' : ''}">${a.support.overdue}</div></div>
-    </div>
+    ${figures([
+      { label: 'Open conversations', value: a.support.open },
+      { label: 'With engineering', value: a.support.escalated, tone: a.support.escalated ? 'warn' : '' },
+      { label: 'Overdue replies', value: a.support.overdue, tone: a.support.overdue ? 'bad' : '' },
+    ])}
     <div class="detail-grid">
       <section class="card">
         <div class="card-head"><h2>Open conversations</h2>${src('intercom')}</div>
@@ -1417,7 +1455,7 @@ async function renderInboxQueue() {
             <td data-label="Subject" class="subj"><div class="ellipsis fw-500">${esc(i.subject)}</div><div class="muted xs ellipsis">${i.ai && i.ai.forMessages === i.messages.length ? `${icon('i-sparkle', 'inline')}${esc(i.ai.summary)}` : esc(i.messages.at(-1)?.text)}</div></td>
             <td data-label="Classification" class="small opt-b">${esc(i.classificationLabel)}${i.escalatedTo ? `<div class="mono info-text xs">${esc(i.escalatedTo)}</div>` : ''}</td>
             <td data-label="Reply due">${dueCell(i)}</td>
-            <td data-label="Owner" class="small ${i.assignee ? '' : 'tone-warn'}">${i.assignee ? esc(i.assignee) : 'Unassigned'}</td>
+            <td data-label="Owner" class="small ${i.assignee ? '' : 'tone-warn'}">${i.assignee ? person(i.assignee) : 'Unassigned'}</td>
             <td data-label="Last message" class="small muted opt-a">${rel(i.updatedAt)}</td>
           </tr>`).join('') || `<tr><td colspan="${INBOX_COLS.length}" class="empty">${tab.id === 'mine' ? 'Nothing assigned to you. Check <b>Unassigned</b>.' : 'Nothing here.'}</td></tr>`}</tbody>
       </table>
@@ -1623,6 +1661,15 @@ function bindCsCards(root, byId) {
 }
 
 // ---------- my portfolio (CS) ----------
+function pfSentence(list, atRisk, anoms, team) {
+  const high = list.filter((a) => a.healthLevel === 'high').length;
+  const renewals = list.filter((a) => a.renewalDays != null && a.renewalDays <= 90).length;
+  return `${dn(moneyCompact(atRisk.reduce((x, a) => x + a.deal.amount, 0)), atRisk.length ? 'warn' : '')} of ARR is at risk across ${count(atRisk.length, 'account')}, of ${team ? "the team's" : 'your'} ${list.length}. `
+    + `${high ? `${dn(high, 'bad')} ${high === 1 ? 'is' : 'are'} high risk` : 'None is high risk'}, `
+    + `${anoms ? `${dn(anoms, 'warn')} usage ${anoms === 1 ? 'anomaly needs' : 'anomalies need'} a look` : 'no usage anomaly needs a look'}, `
+    + `and ${dn(renewals)} ${renewals === 1 ? 'renewal is' : 'renewals are'} due in the next 90 days.`;
+}
+
 async function renderPortfolio(query = new URLSearchParams()) {
   const me = user();
   state.pfOpen ??= new Set();
@@ -1639,7 +1686,7 @@ async function renderPortfolio(query = new URLSearchParams()) {
 
   view.innerHTML = `
     <div class="page-head">
-      <div><h1>My portfolio</h1><p class="muted">Your accounts, riskiest first, and what each one needs next.</p></div>
+      <div><h1>My portfolio</h1><p class="dek">${pfSentence(list, atRisk, anoms, team)}</p></div>
       <div class="row">
         <div class="seg seg-inline" role="group" aria-label="Whose accounts">
           <button class="${!team ? 'sel' : ''}" data-scope="mine" aria-pressed="${!team}">Mine</button>
@@ -1647,12 +1694,6 @@ async function renderPortfolio(query = new URLSearchParams()) {
         </div>
         ${can('anomalies.edit') ? `<button class="btn" data-scan>${icon('i-search')}Check usage now</button>` : ''}
       </div>
-    </div>
-    <div class="kpis">
-      <div class="card kpi"><div class="muted small">ARR at risk</div><div class="v num tone-warn">${moneyCompact(atRisk.reduce((n, a) => n + a.deal.amount, 0))}</div><div class="muted xs">${atRisk.length} of ${list.length} accounts</div></div>
-      <div class="card kpi"><div class="muted small">High risk</div><div class="v num ${list.some((a) => a.healthLevel === 'high') ? 'tone-bad' : ''}">${list.filter((a) => a.healthLevel === 'high').length}</div></div>
-      <div class="card kpi"><div class="muted small">Usage anomalies to review</div><div class="v num ${anoms ? 'tone-warn' : ''}">${anoms}</div></div>
-      <div class="card kpi"><div class="muted small">Renewals in 90 days</div><div class="v num">${list.filter((a) => a.renewalDays != null && a.renewalDays <= 90).length}</div></div>
     </div>
     <div class="card table-wrap">
       <table class="table pf-table">
@@ -1828,7 +1869,7 @@ async function renderOnboarding() {
             <td data-label="Next suggested action" class="pl-next">${stepCell(a)}</td>
             <td data-label="Timeline" class="small">${a.onboarding.completedAt ? `Done in ${days(a.onboarding.startedAt) - days(a.onboarding.completedAt)} days` : `<span class="${days(a.onboarding.startedAt) > 10 ? 'tone-warn' : ''}">Day ${days(a.onboarding.startedAt)}</span>`}</td>
             <td data-label="Properties live" class="num center-col small">${a.usage?.propertiesLive ?? 0}/${a.properties}</td>
-            <td data-label="CSM" class="small opt-a">${esc(a.csm)}</td>
+            <td data-label="CSM" class="small opt-a">${person(a.csm)}</td>
           </tr>`).join('') || `<tr><td colspan="6" class="empty">${state.onbFilter === 'active' ? 'Nobody is onboarding right now. Closing a deal starts one automatically.' : 'Nothing here yet.'}</td></tr>`}</tbody>
       </table>
     </div>`;
@@ -1879,14 +1920,14 @@ async function renderApprovals() {
     <div class="toolbar"><div class="seg seg-inline" role="group" aria-label="Show">${segButtons('aprf', filters.map(([id, label, t]) => [id, label, list.filter(t).length]), state.aprFilter)}</div></div>
     <div class="card table-wrap">
       <table class="table apr-table">
-        <thead><tr><th>Deal</th><th class="num-col">Discount</th><th class="num-col">ARR after discount</th><th>Reason</th><th>Requested</th><th>Decision</th></tr></thead>
+        <thead><tr><th>Deal</th><th class="num-col">Discount</th><th class="num-col opt-b">ARR after discount</th><th>Reason</th><th>Requested</th><th>Decision</th></tr></thead>
         <tbody>${rows.map((p) => `
           <tr data-href="#/accounts/${esc(p.accountId)}">
             <td data-label="Deal"><a class="row-link" href="#/accounts/${esc(p.accountId)}">${esc(p.account.name)}</a> ${segBadge(p.account.segment)}<div class="muted xs">${esc(stageName(p.account.deal.stage))}</div></td>
             <td data-label="Discount" class="num num-col"><b>${p.pct}%</b></td>
-            <td data-label="ARR after discount" class="num num-col">${money(net(p))}<div class="muted xs">from ${money(p.account.deal.amount)}</div></td>
+            <td data-label="ARR after discount" class="num num-col opt-b">${money(net(p))}<div class="muted xs">from ${money(p.account.deal.amount)}</div></td>
             <td data-label="Reason" class="small" title="${esc(p.reason || '')}"><div class="apr-reason">${p.reason ? esc(p.reason) : '<span class="muted">No reason given</span>'}</div></td>
-            <td data-label="Requested" class="small">${esc(p.requestedBy)}<div class="muted xs">${rel(p.requestedAt)}</div></td>
+            <td data-label="Requested" class="small">${person(p.requestedBy)}<div class="muted xs">${rel(p.requestedAt)}</div></td>
             <td data-label="Decision" class="apr-decision">${decision(p)}</td>
           </tr>`).join('') || `<tr><td colspan="6" class="empty">${state.aprFilter === 'pending' ? 'Nothing waiting for approval.' : 'No approvals here yet.'}</td></tr>`}</tbody>
       </table>
@@ -2053,14 +2094,9 @@ async function renderOps() {
 
   view.innerHTML = `
     <div class="page-head">
-      <div><h1>Ops center</h1><p class="muted">What needs fixing right now, across the systems and the revenue process. The <a class="link" href="#/log">Activity log</a> shows what already happened.</p></div>
+      <div><h1>Ops center</h1><p class="dek">${n('bad') ? `${dn(n('bad'), 'bad')} ${n('bad') === 1 ? 'check needs' : 'checks need'} attention now` : 'Nothing is broken right now'} and ${dn(n('warn'), n('warn') ? 'warn' : '')} ${n('warn') === 1 ? 'is' : 'are'} worth a look this week; ${dn(`${n('ok')} of ${d.checks.length}`)} checks are clear. ${live ? `${dn(`${live} of ${d.connections.length}`)} connections are live.` : 'Every connection runs in mock mode.'}</p>
+        <p class="muted small mt-2">What needs fixing now. The <a class="link" href="#/log">Activity log</a> shows what already happened.</p></div>
       <div class="seg seg-inline" role="group" aria-label="Show">${segButtons('opsview', [['open', 'Open issues', n('bad') + n('warn')], ['all', 'All checks', d.checks.length]], state.opsView)}</div>
-    </div>
-    <div class="kpis">
-      <div class="card kpi"><div class="muted small">Needs attention</div><div class="v num ${n('bad') ? 'tone-bad' : ''}">${n('bad')}</div><div class="muted xs">Broken or blocking now</div></div>
-      <div class="card kpi"><div class="muted small">Worth a look</div><div class="v num ${n('warn') ? 'tone-warn' : ''}">${n('warn')}</div><div class="muted xs">Drifting; fix this week</div></div>
-      <div class="card kpi"><div class="muted small">All clear</div><div class="v num">${n('ok')} of ${d.checks.length}</div><div class="muted xs">Checks with nothing to fix</div></div>
-      <div class="card kpi"><div class="muted small">Connections live</div><div class="v num">${live} of ${d.connections.length}</div><div class="muted xs">${live ? 'The rest run in mock mode' : 'All in mock mode'}</div></div>
     </div>
     <div class="card ops-strip">
       <div class="ops-conns">${d.connections.map((c) => `<a class="ops-conn" href="#/connections" title="${c.lastCallAt ? `Last call ${relText(c.lastCallAt)}` : 'No calls yet'}">${src(c.id, c.name)}<span class="xs ${c.failed24h ? 'tone-bad' : 'muted'}">${c.failed24h ? `${c.failed24h} failed` : c.live ? 'Live' : 'Mock'}</span></a>`).join('')}</div>
@@ -2303,8 +2339,8 @@ const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 const replay = (el, cls) => { el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); el.addEventListener('animationend', () => el.classList.remove(cls), { once: true }); };
 const KEYED = 'tr[data-href], tr[data-key], .deal[data-deal], .act[data-id], .gm-action[data-key]';
 const keyOf = (el) => el.dataset.href ?? el.dataset.deal ?? el.dataset.id ?? el.dataset.key;
-const COUNTED = '.kpi .v, .metric .v, .hs-num';
-const countKey = (el, i) => `${el.closest('.kpi, .metric')?.firstElementChild?.textContent.trim() ?? 'n'}#${i}`;
+const COUNTED = '.dek .dn, .figures .v, .metric .v, .hs-num';
+const countKey = (el, i) => `${el.closest('.fig, .metric')?.firstElementChild?.textContent.trim() ?? 'n'}#${i}`;
 
 function motionSnapshot() {
   const rows = new Map();
@@ -2439,7 +2475,7 @@ async function route({ keepScroll = false } = {}) {
 }
 
 const SKELETON = `<div class="skel" aria-busy="true" aria-label="Loading"><div class="sk sk-title"></div><div class="sk sk-line"></div>
-  <div class="kpis">${'<div class="sk sk-card"></div>'.repeat(4)}</div><div class="sk sk-block"></div></div>`;
+  <div class="sk sk-line"></div><div class="sk sk-block"></div></div>`;
 
 async function init() {
   state.meta = await fetch('/api/meta').then((r) => r.json());

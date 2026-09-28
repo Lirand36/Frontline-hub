@@ -10,6 +10,18 @@ An internal workspace for Sales, Support and Customer Success. The UI is plain J
 - Never email anyone but the owner's own address in live mode. Sample email addresses end in `.invalid`. Never ask for keys in chat; they go in Render → Environment.
 - Before calling a feature done, work through the checklist at the bottom.
 
+## The look: "Ledger"
+Precise and editorial, like a well-set report. One type family (Google Sans), with numbers in its monospace cut. Aim for print, not a generic SaaS dashboard.
+- **Surface:** warm paper, ink text and hairline rules. No shadows except on things that float (dialogs, menus, toasts). Corners are nearly square.
+- **Fonts, only these tokens:**
+  - `--font-display` (Google Sans Flex, set large, tight and medium weight) for page titles, the wordmark, dialog titles and section rows in tables.
+  - `--font` (Google Sans Flex) for all text.
+  - `--mono` (Google Sans Code) for money, counts and small-caps labels (table headers, stage names).
+- **One accent:** deep green means "act here" (primary buttons, links, next steps). Red and amber are only for problems.
+- **A page opens with a sentence, not number cards.** Under the large `h1`, one `.dek` sentence weaves the key numbers in with `dn(value, tone)`, e.g. "$1.2M open across 10 deals; 2 close dates have passed…". Where separate figures read better (Good morning, an account's Support tab), use `figures([...])`: a slim row with hairlines, no boxes. Don't build rows of number cards.
+- **People** show as `person(name)`: an initials avatar in a stable tint, then the name. Use it wherever a column is a person (owner, CSM, requester).
+- **Details beside a list:** on the Pipeline board, clicking a deal opens a side panel (`dealPanel`) with the facts, all suggested actions and recent activity. The name still links to the account. On screens under 1360px it slides over the board. Reuse this pattern for other boards and lists that need "look before you open".
+
 ## Wording
 - Soft, plain, non-technical sentences. Say what happened and what to do next.
 - Titles read **"Account · action"** (for example "Lakeview Lodges · close date"). Never use "Account: action".
@@ -22,10 +34,10 @@ An internal workspace for Sales, Support and Customer Success. The UI is plain J
 - No emoji. Use line icons from the sprite in `index.html`. Add new icons there as `<symbol id="i-…">`.
 
 ## Page structure (copy an existing page)
-1. `.page-head`:
-   - Left side: an `h1` and one muted line describing the page.
-   - Right side, top-right: the controls, meaning a `segButtons` filter or a `.btn`.
-2. `.kpis`: four `.card.kpi` blocks, each with a label, a value (`.v.num`, toned) and a muted subline.
+1. `.page-head` (ends with a solid ink rule):
+   - Left side: the large `h1`, then the page's state as a `.dek` sentence. Pages without numbers keep one muted line describing the page.
+   - Right side, top-right: the controls, meaning a `segButtons` filter (shown as underlined text) or a `.btn`.
+2. Optional `figures([...])` when separate numbers read better than a sentence.
 3. The list itself is **a table, not cards**: `.card.table-wrap > table.table`.
    - Grouped lists use `tr.group-row > th` (see Feature requests and Ops center).
    - A row that goes somewhere carries `data-href`, and the whole row is clickable.
@@ -41,6 +53,8 @@ An internal workspace for Sales, Support and Customer Success. The UI is plain J
 | Suggested action or a clickable item | `saCard` or `csCard` (`.sa` card: what to do + why + arrow). `+N more` uses `.sa-more`. |
 | Risk or level | `riskChip(level, score)`, or `.chip.good/.warn/.bad` with a `.dot` |
 | Account status | `statusChip(status)`. Enterprise uses `segBadge(segment)`. |
+| A person | `person(name)`, or `avatar(name)` alone |
+| Page summary | `.dek` with `dn(value, tone)` inside; `figures([{label, value, tone, sub}])` |
 | A system (HubSpot, Slack…) | `src(systemId, name)`: the colored dot plus the name |
 | Pop-up with a form | `formDialog(html, label, onSubmit(form, opts))`. It adds \* marks, shows errors under fields, and handles the "are you sure?" (`code: 'confirm'`) and "someone else edited this" (`code: 'stale'`) replies. Simple forms can use `openModal`. |
 | Deal edits | Send `...dealBase(a)` (version + time zone) and `...opts`, so stale edits are caught |
@@ -51,8 +65,9 @@ An internal workspace for Sales, Support and Customer Success. The UI is plain J
 
 ## Styles (`public/styles.css`)
 - Use the tokens only:
+  - Fonts are `var(--font)`, `var(--font-display)` or `var(--mono)`.
   - Colors are `var(--…)`.
-  - Text sizes are `var(--fs-2xs … --fs-hero)`.
+  - Text sizes are `var(--fs-2xs … --fs-title)`.
   - Corner radii are `var(--r-sm|md|lg|pill)`.
   - Spacing is `var(--s-1…4)`.
 - No inline `style=""` except for data-driven widths or colors. Use the utility classes instead (`mt-1…4`, `mb-1…4`, `gap-1/2`, `fw-500/600`, `no-wrap`, `items-start`).
@@ -68,7 +83,7 @@ An internal workspace for Sales, Support and Customer Success. The UI is plain J
   - A new page needs a cap, an entry in `TITLES`, a sidebar link, and a route.
 
 ## Before calling a feature done
-1. `npm run check:design` passes. It checks tokens, inline styles, emoji, "Account · action" titles, and page wiring.
+1. `npm run check:design` passes. It checks tokens (including fonts), inline styles, emoji, "Account · action" titles, number-card rows, and page wiring.
 2. Screenshots in light, dark and phone (390px). No horizontal scroll, and no table cut off at 1024, 1280 or 1440px.
 3. Compare the feature against this file: the same words, components and table patterns as the pages next to it.
 4. Test it as each role that can reach it, and as one that can't.

@@ -18,9 +18,10 @@ const lines = (file) => readFileSync(file, 'utf8').split('\n');
     const n = i + 1;
     const code = l.replace(/\/\*.*?\*\//g, '');
     for (const m of code.matchAll(/#[0-9a-fA-F]{3,8}\b/g)) report(file, n, `raw color ${m[0]}: use a color token (var(--…))`);
-    for (const m of code.matchAll(/font-size:\s*([^;}]+)/g)) if (!/^var\(--fs-[\w]+\)$/.test(m[1].trim())) report(file, n, `font-size ${m[1].trim()}: use the type scale (var(--fs-xs … --fs-hero))`);
+    for (const m of code.matchAll(/font-size:\s*([^;}]+)/g)) if (!/^var\(--fs-[\w]+\)$/.test(m[1].trim())) report(file, n, `font-size ${m[1].trim()}: use the type scale (var(--fs-2xs … --fs-title))`);
     for (const m of code.matchAll(/(?<![\w-])border-radius:\s*([^;}]+)/g)) if (!RADIUS_OK.test(m[1].trim())) report(file, n, `border-radius ${m[1].trim()}: use var(--r-sm|md|lg|pill)`);
     for (const m of code.matchAll(/font:\s*([\d.]+px)/g)) report(file, n, `font ${m[1]}: use var(--fs-…)`);
+    for (const m of code.matchAll(/font-family:\s*([^;}]+)/g)) if (!/^(var\(--(font|font-display|mono)\)|inherit)$/.test(m[1].trim())) report(file, n, `font-family ${m[1].trim()}: use var(--font), var(--font-display) or var(--mono)`);
   });
 }
 
@@ -32,6 +33,7 @@ for (const file of uiFiles) {
     for (const m of l.matchAll(/style="([^"]*)"/g)) if (!m[1].includes('${')) report(file, n, `inline style "${m[1]}": use a utility class (mt-2, fw-600…) or a component class`);
     for (const m of l.matchAll(/\p{Extended_Pictographic}/gu)) report(file, n, `emoji ${m[0]}: use a line icon from the sprite in index.html`);
     if (/\$\{(esc\()?a\??\.name\)?\}: /.test(l)) report(file, n, 'title uses "Account: …": write "Account · …"');
+    if (/class="kpis|class="card kpi/.test(l)) report(file, n, 'number-card row: open the page with a summary sentence (dek + dn) or figures()');
   });
 }
 

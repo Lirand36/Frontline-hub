@@ -59,7 +59,7 @@ function support(user) {
     actions.push({
       id: `esc-${c.id}`, priority: 'info', icon: 'i-clock', sort: 0,
       title: `Waiting on engineering: ${c.escalatedTo}`,
-      detail: `${a.name}: ${c.subject}. Give the customer an update when Jira moves.`,
+      detail: `${a.name} · ${c.subject}. Give the customer an update when Jira moves.`,
       tags: [{ text: c.escalatedTo, tone: 'info' }],
       cta: link('Open conversation', `#/inbox/${c.id}`),
     });

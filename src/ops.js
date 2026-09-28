@@ -47,7 +47,7 @@ const CHECKS = [
       const failed = getLog().filter((e) => !e.ok && age(e.ts ?? e.at ?? Date.now()) < DAY);
       const bySys = Object.groupBy ? Object.groupBy(failed, (e) => e.system) : failed.reduce((m, e) => ((m[e.system] ??= []).push(e), m), {});
       return Object.entries(bySys).map(([sys, list]) => ({
-        text: `${SYSTEM_NAMES[sys] ?? sys}: ${list.length} failed ${list.length === 1 ? 'call' : 'calls'}`,
+        text: `${SYSTEM_NAMES[sys] ?? sys} · ${list.length} failed ${list.length === 1 ? 'call' : 'calls'}`,
         sub: `Last: ${list[0].action} · ${String(list[0].response?.error ?? list[0].response?.message ?? `status ${list[0].status}`).slice(0, 120)}`,
         at: list.at(-1).ts ?? null, href: '#/log',
       }));
@@ -88,7 +88,7 @@ const CHECKS = [
     level: (items) => (items.some((i) => i.bad) ? 'bad' : 'warn'),
     items() {
       return db.accounts.filter((a) => a.platform && a.platform.syncStatus !== 'ok').map((a) => ({
-        text: `${a.name}: ${a.platform.erp} sync ${a.platform.syncStatus}`,
+        text: `${a.name} · ${a.platform.erp} sync ${a.platform.syncStatus}`,
         sub: `${a.platform.syncErrors24h} errors in 24h · last sync ${ago(a.platform.lastSyncAt)} · CSM ${a.csm}`,
         at: a.platform.lastSyncAt, href: `#/accounts/${a.id}?tab=health`, bad: a.platform.syncStatus === 'failing',
       }));
@@ -106,7 +106,7 @@ const CHECKS = [
         const gaps = gapsSoFar(a);
         if (!gaps.length) return [];
         const labels = gaps.flatMap((g) => STAGE_GATES[g].fields.filter((f) => !f.requiredIf && (a.deal.fields[f.id] == null || a.deal.fields[f.id] === '' || (Array.isArray(a.deal.fields[f.id]) && !a.deal.fields[f.id].length)) && f.id !== 'closeDate').map((f) => f.label.toLowerCase()));
-        return [{ text: `${a.name}: missing ${labels.slice(0, 3).join(', ') || 'stage details'}`, sub: `${stageLabel(a.deal.stage)} · ${a.owner}`, at: a.deal.stageEnteredAt ?? null, href: `#/accounts/${a.id}` }];
+        return [{ text: `${a.name} · missing ${labels.slice(0, 3).join(', ') || 'stage details'}`, sub: `${stageLabel(a.deal.stage)} · ${a.owner}`, at: a.deal.stageEnteredAt ?? null, href: `#/accounts/${a.id}` }];
       });
     },
   },
@@ -117,7 +117,7 @@ const CHECKS = [
     clear: 'Every open deal has a close date ahead.',
     items() {
       return db.accounts.filter((a) => isOpen(a) && a.deal.closeDate && new Date(a.deal.closeDate) < new Date()).map((a) => ({
-        text: `${a.name}: close date ${fmtDay(a.deal.closeDate)} passed`, sub: `${stageLabel(a.deal.stage)} · ${a.owner}`, at: a.deal.closeDate, href: `#/pipeline?do=closedate&deal=${a.id}`,
+        text: `${a.name} · close date ${fmtDay(a.deal.closeDate)} passed`, sub: `${stageLabel(a.deal.stage)} · ${a.owner}`, at: a.deal.closeDate, href: `#/pipeline?do=closedate&deal=${a.id}`,
       }));
     },
   },
@@ -129,7 +129,7 @@ const CHECKS = [
     items() {
       return db.accounts.filter(isOpen).flatMap((a) => {
         const s = dealSignals(a).find((x) => x.type === 'silent');
-        return s ? [{ text: `${a.name}: no reply in ${s.days} days`, sub: `${a.contact.name} · ${a.owner}`, at: new Date(Date.now() - s.days * DAY).toISOString(), href: `#/pipeline?do=followup&deal=${a.id}` }] : [];
+        return s ? [{ text: `${a.name} · no reply in ${s.days} days`, sub: `${a.contact.name} · ${a.owner}`, at: new Date(Date.now() - s.days * DAY).toISOString(), href: `#/pipeline?do=followup&deal=${a.id}` }] : [];
       });
     },
   },
@@ -141,11 +141,11 @@ const CHECKS = [
     items() {
       const apr = db.approvals.filter((p) => p.status === 'pending' && age(p.requestedAt) > DAY).map((p) => {
         const a = db.accounts.find((x) => x.id === p.accountId);
-        return { text: `${a?.name}: ${p.pct}% discount waiting for approval`, sub: `Asked by ${p.requestedBy} ${ago(p.requestedAt)}`, at: p.requestedAt, href: '#/approvals' };
+        return { text: `${a?.name} · ${p.pct}% discount waiting for approval`, sub: `Asked by ${p.requestedBy} ${ago(p.requestedAt)}`, at: p.requestedAt, href: '#/approvals' };
       });
       const mv = db.moveRequests.filter((r) => r.status === 'pending' && age(r.at) > 4 * HOUR).map((r) => {
         const a = db.accounts.find((x) => x.id === r.accountId);
-        return { text: `${a?.name}: move back to ${stageLabel(r.to)} waiting`, sub: `Asked by ${r.by} ${ago(r.at)}`, at: r.at, href: '#/home' };
+        return { text: `${a?.name} · move back to ${stageLabel(r.to)} waiting`, sub: `Asked by ${r.by} ${ago(r.at)}`, at: r.at, href: '#/home' };
       });
       return [...apr, ...mv];
     },
@@ -159,7 +159,7 @@ const CHECKS = [
     clear: 'Every customer got a reply in time.',
     items() {
       return convs().filter(({ c }) => c.slaDueAt && new Date(c.slaDueAt) < new Date()).map(({ a, c }) => ({
-        text: `${a.name}: “${c.subject}”`, sub: `${c.assignee ?? 'Unassigned'} · due ${ago(c.slaDueAt)}`, at: c.slaDueAt, href: `#/inbox/${c.id}`,
+        text: `${a.name} · “${c.subject}”`, sub: `${c.assignee ?? 'Unassigned'} · due ${ago(c.slaDueAt)}`, at: c.slaDueAt, href: `#/inbox/${c.id}`,
       }));
     },
   },
@@ -170,7 +170,7 @@ const CHECKS = [
     clear: 'Every open conversation has an owner.',
     items() {
       return convs().filter(({ c }) => !c.assignee).map(({ a, c }) => ({
-        text: `${a.name}: “${c.subject}”`, sub: `Waiting ${ago(c.messages?.at(-1)?.at ?? c.updatedAt).replace(' ago', '')}`, at: c.updatedAt, href: `#/inbox/${c.id}`,
+        text: `${a.name} · “${c.subject}”`, sub: `Waiting ${ago(c.messages?.at(-1)?.at ?? c.updatedAt).replace(' ago', '')}`, at: c.updatedAt, href: `#/inbox/${c.id}`,
       }));
     },
   },
@@ -182,7 +182,7 @@ const CHECKS = [
     items() {
       return db.accounts.filter((a) => a.status === 'Live').flatMap((a) => {
         const t = usageTrend(a);
-        return t != null && t <= -0.2 ? [{ text: `${a.name}: usage down ${Math.round(-t * 100)}%`, sub: `Last 4 weeks vs the 4 before · CSM ${a.csm}`, at: null, href: `#/accounts/${a.id}?tab=health` }] : [];
+        return t != null && t <= -0.2 ? [{ text: `${a.name} · usage down ${Math.round(-t * 100)}%`, sub: `Last 4 weeks vs the 4 before · CSM ${a.csm}`, at: null, href: `#/accounts/${a.id}?tab=health` }] : [];
       });
     },
   },
@@ -194,7 +194,7 @@ const CHECKS = [
     items() {
       return db.anomalies.filter((x) => x.status === 'new').map((x) => {
         const a = db.accounts.find((y) => y.id === x.accountId);
-        return { text: `${a?.name}: ${x.label} ${x.direction === 'up' ? 'up' : 'down'}`, sub: `Found ${ago(x.detectedAt)} · CSM ${a?.csm}`, at: x.detectedAt, href: `#/accounts/${x.accountId}?tab=health` };
+        return { text: `${a?.name} · ${x.label} ${x.direction === 'up' ? 'up' : 'down'}`, sub: `Found ${ago(x.detectedAt)} · CSM ${a?.csm}`, at: x.detectedAt, href: `#/accounts/${x.accountId}?tab=health` };
       });
     },
   },
@@ -205,7 +205,7 @@ const CHECKS = [
     clear: 'Every onboarding is on track.',
     items() {
       return db.accounts.filter((a) => a.status === 'Onboarding' && a.onboarding && age(a.onboarding.startedAt) > 10 * DAY).map((a) => ({
-        text: `${a.name}: day ${Math.floor(age(a.onboarding.startedAt) / DAY)} of onboarding`, sub: `CSM ${a.csm}`, at: a.onboarding.startedAt, href: `#/accounts/${a.id}?tab=overview`,
+        text: `${a.name} · day ${Math.floor(age(a.onboarding.startedAt) / DAY)} of onboarding`, sub: `CSM ${a.csm}`, at: a.onboarding.startedAt, href: `#/accounts/${a.id}?tab=overview`,
       }));
     },
   },
@@ -217,7 +217,7 @@ const CHECKS = [
     items() {
       return db.featureRequests.filter((f) => f.status === 'shipped').flatMap((f) => f.accounts.filter((r) => !r.notified).map((r) => {
         const a = db.accounts.find((x) => x.id === r.accountId);
-        return { text: `${a?.name}: “${f.title}”`, sub: `${f.jiraKey} · CSM ${a?.csm}`, at: f.updatedAt ?? null, href: '#/requests' };
+        return { text: `${a?.name} · “${f.title}”`, sub: `${f.jiraKey} · CSM ${a?.csm}`, at: f.updatedAt ?? null, href: '#/requests' };
       }));
     },
   },

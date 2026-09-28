@@ -13,3 +13,12 @@ services:
       # Used in Slack messages for "Open in Frontline Hub" links, e.g. https://your-service.onrender.com
       - key: PUBLIC_URL
         sync: false
+      # Slack (set the values in Render → Environment; see Connections → Slack → How to connect)
+      - key: SLACK_BOT_TOKEN
+        sync: false
+      - key: SLACK_SIGNING_SECRET
+        sync: false
+      - key: SLACK_DM_USER_ID
+        sync: false
+      - key: SLACK_APPROVER_IDS
+        sync: false

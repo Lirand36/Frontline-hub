@@ -120,11 +120,21 @@ const integrations = () => [
   { id: 'hubspot', name: 'HubSpot', role: 'CRM: deals, notes', live: hubspot.isLive(), env: ['HUBSPOT_TOKEN'] },
   { id: 'intercom', name: 'Intercom', role: 'Support conversations', live: intercom.isLive(), env: ['INTERCOM_TOKEN', 'INTERCOM_ADMIN_ID', 'INTERCOM_CLIENT_SECRET'] },
   { id: 'jira', name: 'Jira', role: 'Escalations & onboarding epics', live: jira.isLive(), env: ['JIRA_BASE_URL', 'JIRA_EMAIL', 'JIRA_API_TOKEN'] },
-  { id: 'slack', name: 'Slack', role: 'Alerts, approvals, onboarding channels', live: slack.isLive(), env: ['SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET', 'SLACK_CHANNEL_*'] },
+  { id: 'slack', name: 'Slack', role: 'Alerts, approvals, onboarding channels', live: slack.isLive(), env: ['SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET', 'SLACK_DM_USER_ID', 'SLACK_APPROVER_IDS', 'SLACK_CHANNEL_*'], testable: true,
+    notes: slack.isLive() ? [slack.dmRedirect() ? `Every DM goes to ${slack.dmRedirect()}, labelled with who it was for.` : 'Add SLACK_DM_USER_ID so DMs come to you; the sample team has made-up Slack IDs.'] : [] },
   { id: 'snowflake', name: 'Snowflake', role: 'Product usage in, hub events out', live: snowflake.isLive(), env: ['SNOWFLAKE_ACCOUNT', 'SNOWFLAKE_TOKEN', 'SNOWFLAKE_WAREHOUSE'] },
   { id: 'google', name: 'Google Calendar & Meet', role: 'Meeting invites and video calls', live: google.isLive(), env: ['GOOGLE_SERVICE_ACCOUNT_JSON'] },
   { id: 'claude', name: 'Claude', role: 'AI assist: summaries & draft replies', live: claude.isLive(), env: ['ANTHROPIC_API_KEY', 'CLAUDE_MODEL'] },
 ];
+
+// One real, harmless call per system to prove the keys work. Slack only for now.
+async function testConnection(id) {
+  if (id !== 'slack') throw new svc.HttpError(404, 'No connection test for this system yet');
+  if (!slack.isLive()) return { ok: false, message: 'Not connected yet: add SLACK_BOT_TOKEN in Render → Environment.' };
+  const r = await slack.authTest();
+  if (!r.ok) return { ok: false, message: `Slack said: ${r.response?.error ?? `status ${r.status}`}. Check the bot token.` };
+  return { ok: true, message: `Connected to the ${r.response.team} workspace as @${r.response.user}.${slack.dmRedirect() ? ` DMs go to ${slack.dmRedirect()}.` : ' Add SLACK_DM_USER_ID so DMs come to you.'}` };
+}
 
 // Who may call what (roles in src/access.js). The first matching rule wins; no rule means everyone.
 // The UI hides what a role can't use, but this is what actually enforces it.
@@ -135,6 +145,7 @@ const GUARDS = [
   ['GET', /^\/api\/approvals$/, 'approvals.view'],
   ['GET', /^\/api\/(log|activity)$/, 'log.view'],
   ['GET', /^\/api\/ops$/, 'ops.view'],
+  ['POST', /^\/api\/connections\//, 'connections.view'], // admin only
   ['POST', /^\/api\/accounts\/[\w-]+\/(deal-stage|deal-fields|follow-up|ask-colleague|discount|move-back)$/, 'deal.edit'],
   ['POST', /^\/api\/move-requests\//, 'deal.moveback'], // admin only (no other role has this)
   ['POST', /^\/api\/accounts\/[\w-]+\/notes$/, 'accounts.note'],
@@ -191,6 +202,8 @@ const routes = [
   ['GET', /^\/api\/approvals$/, (req) => db.approvals.filter((p) => can(actorOf(req), 'approvals.team') || p.requestedBy === actorOf(req).name).map((p) => ({ ...p, account: summary(db.accounts.find((a) => a.id === p.accountId)) }))],
   ['GET', /^\/api\/log$/, () => getLog()],
   // Activity log: one row per user action, with the plain-language steps it caused
+  // "Test connection" on the Connections page (admin)
+  ['POST', /^\/api\/connections\/(\w+)\/test$/, (req, [id]) => testConnection(id)],
   // Ops center: what needs fixing right now (src/ops.js)
   ['GET', /^\/api\/ops$/, () => opsView(integrations())],
   ['GET', /^\/api\/activity$/, () => {

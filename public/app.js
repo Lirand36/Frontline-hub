@@ -117,7 +117,7 @@ async function api(path, { method = 'GET', body } = {}) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || res.statusText);
+  if (!res.ok) throw Object.assign(new Error(data.error || res.statusText), data, { status: res.status });
   return data;
 }
 
@@ -319,11 +319,15 @@ function gateFieldsHtml(a, gates) {
         const v = gateValue(a, f.id);
         const id = `gf-${f.id}`;
         const req = f.requiredIf ? '' : 'required';
+        // New dates can't be in the past; a date already on record (e.g. a demo that happened) can stay
+        const today = new Date().toLocaleDateString('en-CA');
+        const min = f.type === 'date' && (!v || v >= today) ? `min="${today}"` : f.type === 'datetime-local' && (!v || new Date(v) >= new Date()) ? `min="${toLocalInput(new Date())}"` : '';
+        const cap = f.type === 'textarea' ? 'maxlength="2000"' : f.type === 'text' ? 'maxlength="200"' : f.type === 'number' ? 'min="1" step="1"' : '';
         const label = `<label for="${id}">${esc(f.label)}${f.requiredIf ? ` <span class="muted xs">(needed if “${esc(f.requiredIf[1])}”)</span>` : ''}</label>`;
-        if (f.type === 'textarea') return `<div class="field">${label}<textarea class="input" id="${id}" name="${f.id}" rows="2" ${req} placeholder="${esc(f.placeholder ?? '')}">${esc(v)}</textarea></div>`;
+        if (f.type === 'textarea') return `<div class="field">${label}<textarea class="input" id="${id}" name="${f.id}" rows="2" ${req} ${cap} placeholder="${esc(f.placeholder ?? '')}">${esc(v)}</textarea></div>`;
         if (f.type === 'select') return `<div class="field">${label}<select class="input" id="${id}" name="${f.id}" ${req}><option value="">Choose…</option>${f.options.map((o) => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></div>`;
-        if (f.type === 'multi') return `<div class="field"><span class="flabel">${esc(f.label)}</span><div class="checks" data-multi="${f.id}">${f.options.map((o) => `<label class="check-pill"><input type="checkbox" name="${f.id}" value="${esc(o)}" ${(v || []).includes(o) ? 'checked' : ''} /> ${esc(o)}</label>`).join('')}</div></div>`;
-        return `<div class="field">${label}<input class="input" id="${id}" name="${f.id}" type="${f.type}" value="${esc(v)}" ${req} placeholder="${esc(f.placeholder ?? '')}" ${f.type === 'number' ? 'min="0"' : ''} />${f.hint ? `<div class="muted xs">${esc(f.hint)}</div>` : ''}</div>`;
+        if (f.type === 'multi') return `<div class="field"><span class="flabel" ${req ? 'data-required' : ''}>${esc(f.label)}</span><div class="checks" data-multi="${f.id}">${f.options.map((o) => `<label class="check-pill"><input type="checkbox" name="${f.id}" value="${esc(o)}" ${(v || []).includes(o) ? 'checked' : ''} /> ${esc(o)}</label>`).join('')}</div></div>`;
+        return `<div class="field">${label}<input class="input" id="${id}" name="${f.id}" type="${f.type}" value="${esc(v)}" ${req} ${min} ${cap} placeholder="${esc(f.placeholder ?? '')}" />${f.hint ? `<div class="muted xs">${esc(f.hint)}</div>` : ''}</div>`;
       }).join('')}
     </fieldset>`).join('');
 }
@@ -332,8 +336,9 @@ function gateFieldsHtml(a, gates) {
 function gateCheck(form, gates) {
   const G = state.meta.stageGates;
   for (const g of gates) for (const f of G[g].fields) {
-    if (f.type === 'multi' && !$$(`input[name="${f.id}"]:checked`, form).length) return `Pick at least one: ${f.label.toLowerCase()}.`;
-    if (f.requiredIf && form[f.requiredIf[0]]?.value === f.requiredIf[1] && !form[f.id].value.trim()) return `Please add the ${f.label.toLowerCase()}.`;
+    // Returned as an error that points at its field, so it shows under that field
+    if (f.type === 'multi' && !$$(`input[name="${f.id}"]:checked`, form).length) return Object.assign(new Error(`Pick at least one: ${f.label.toLowerCase()}.`), { field: f.id });
+    if (f.requiredIf && form[f.requiredIf[0]]?.value === f.requiredIf[1] && !form[f.id].value.trim()) return Object.assign(new Error(`Please add the ${f.label.toLowerCase()}.`), { field: f.id });
   }
   return null;
 }
@@ -345,22 +350,108 @@ function collectGate(form, gates) {
   return out;
 }
 
-// A small form dialog: validates, calls onSubmit(form), closes on success.
+// ---------- forms: required marks, errors under the field, "are you sure?" and "someone else edited this" ----------
+const agoWords = (iso) => { const m = Math.round((Date.now() - new Date(iso)) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} minute${m === 1 ? '' : 's'} ago` : `${Math.round(m / 60)} hour${m < 90 ? '' : 's'} ago`; };
+
+// Every required field gets a *, and the form says what * means.
+function markRequired(form) {
+  let any = false;
+  $$('[required], .flabel[data-required]', form).forEach((el) => {
+    const label = el.matches('.flabel') ? el : (el.id && $(`label[for="${el.id}"]`, form)) || el.closest('.field')?.querySelector('label, .flabel');
+    if (!label) return;
+    any = true;
+    if (!$('.req', label)) label.insertAdjacentHTML('beforeend', '<span class="req" aria-hidden="true">*</span>');
+  });
+  if (any && !$('.req-note', form)) ($('h2', form) ?? form.firstElementChild)?.insertAdjacentHTML('afterend', '<p class="req-note"><span class="req" aria-hidden="true">*</span> Required</p>');
+}
+const labelOf = (el, form) => ((el.id && $(`label[for="${el.id}"]`, form)) || el.closest('.field')?.querySelector('label, .flabel'))?.firstChild?.textContent.trim() || 'this field';
+function clearErrors(form) {
+  $$('.field-error', form).forEach((x) => x.remove());
+  $$('[aria-invalid]', form).forEach((x) => x.removeAttribute('aria-invalid'));
+  $('.form-error', form).hidden = true;
+}
+// Puts a message under the field it's about and moves the cursor there.
+function fieldError(form, name, msg, focus = true) {
+  const el = form.elements[name] instanceof RadioNodeList ? form.elements[name][0] : form.elements[name];
+  const target = el ?? $(`[data-multi="${name}"]`, form);
+  if (!target) return false;
+  (target.closest('.field') ?? target.parentElement).insertAdjacentHTML('beforeend', `<p class="field-error" role="alert">${esc(msg)}</p>`);
+  target.setAttribute('aria-invalid', 'true');
+  if (focus) (el ?? $('input', target))?.focus();
+  return true;
+}
+// The browser's checks, in our words, shown inline for every field at once.
+function clientCheck(form) {
+  const bad = $$('input, select, textarea', form).filter((el) => !el.disabled && !el.closest('[hidden]') && !el.checkValidity());
+  bad.forEach((el, i) => {
+    const label = labelOf(el, form), v = el.validity;
+    const msg = v.valueMissing ? el.dataset.missing ?? `Please fill in ${label.toLowerCase()}.`
+      : v.rangeUnderflow && el.type === 'date' ? `${label} can't be in the past. Please pick today or a later date.`
+      : v.rangeUnderflow && el.type === 'datetime-local' ? `${label} can't be in the past. Please pick an upcoming date and time.`
+      : v.rangeUnderflow ? `${label} should be at least ${el.min}.`
+      : v.rangeOverflow ? `${label} should be at most ${el.max}.`
+      : v.stepMismatch ? `${label} should be a whole number.`
+      : v.typeMismatch && el.type === 'email' ? 'Please enter a valid email address.'
+      : el.validationMessage;
+    fieldError(form, el.name, msg, i === 0);
+  });
+  return !bad.length;
+}
+// What the server said, shown where it helps: under the field, as an "are you sure?", or as "someone else edited this".
+function showFormError(form, x, opts, go, label) {
+  const box = $('.form-alert', form), err = $('.form-error', form);
+  if (x.code === 'confirm') {
+    box.className = 'form-alert warn';
+    box.innerHTML = `${icon('i-alert')}<div>${(x.warnings ?? [{ message: x.message }]).map((w) => `<p>${esc(w.message)}</p>`).join('')}<p class="muted xs mt-1">Change it above, or continue if it's right.</p></div>`;
+    box.hidden = false;
+    opts.confirmed = true;
+    go.textContent = label === 'Send invite' || label === 'Start the call' ? 'Book anyway' : 'Save anyway';
+    return;
+  }
+  if (x.code === 'stale') {
+    box.className = 'form-alert info';
+    box.innerHTML = `${icon('i-clock')}<div><p><b>${esc(x.by)}</b> edited this deal ${agoWords(x.at)}${x.what ? ` (${esc(x.what)})` : ''}.</p>
+      <p class="muted small">You opened this before their change. Check the latest version, or save yours over it.</p>
+      <div class="row mt-2"><button type="button" class="btn sm" data-latest>Show the latest</button><button class="btn sm" value="force">Save mine anyway</button></div></div>`;
+    box.hidden = false;
+    $('[data-latest]', box).addEventListener('click', () => { form.closest('dialog').close(); route({ keepScroll: true }); });
+    opts.force = true;
+    return;
+  }
+  if (x.field && fieldError(form, x.field, x.message)) return;
+  err.textContent = x.message; err.hidden = false;
+}
+// Shown when a deal pop-up opens and someone else changed the deal in the last half hour.
+const editNote = (a) => {
+  const d = a.deal;
+  if (!d?.editedBy || d.editedBy === user().name || Date.now() - new Date(d.editedAt) > 30 * 60_000) return '';
+  return `<div class="form-alert info">${icon('i-clock')}<div><p><b>${esc(d.editedBy)}</b> edited this deal ${agoWords(d.editedAt)}${d.lastChange ? ` (${esc(d.lastChange)})` : ''}.</p></div></div>`;
+};
+const dealBase = (a) => ({ baseVersion: a.deal.version, tz: browserTz() });
+
+// A small form dialog: validates, calls onSubmit(form, opts), closes on success.
+// opts.confirmed / opts.force are set when the user answers "are you sure?" or "someone else edited this".
 function formDialog(html, submitLabel, onSubmit, { danger = false } = {}) {
   const dlg = $('#modal');
-  dlg.innerHTML = `<form method="dialog" class="wide-form" novalidate>${html}<p class="form-error" role="alert" hidden></p>
+  dlg.innerHTML = `<form method="dialog" class="wide-form" novalidate>${html}<div class="form-alert" role="status" hidden></div><p class="form-error" role="alert" hidden></p>
     <div class="dialog-actions"><button class="btn ${danger ? 'danger-fill' : 'primary'}" value="ok">${esc(submitLabel)}</button><button class="btn" value="cancel" formnovalidate>Cancel</button></div></form>`;
   const form = $('form', dlg);
-  const err = $('.form-error', form);
+  const go = $('button[value="ok"]', form);
+  const opts = { confirmed: false, force: false };
+  markRequired(form);
   form.addEventListener('submit', (e) => {
-    if (e.submitter?.value !== 'ok') return;
+    if (!['ok', 'force'].includes(e.submitter?.value)) return;
     e.preventDefault();
-    err.hidden = true;
-    if (!form.checkValidity()) { form.reportValidity(); return; }
+    clearErrors(form);
+    if (!clientCheck(form)) return;
     run(e.submitter, async () => {
-      // Errors stay in the dialog, next to what needs fixing
-      try { await onSubmit(form); dlg.close(); } catch (x) { err.textContent = x.message; err.hidden = false; }
+      try { await onSubmit(form, opts); dlg.close(); } catch (x) { showFormError(form, x, opts, go, go.textContent); }
     });
+  });
+  // Changing anything after a warning means it gets checked again
+  form.addEventListener('input', () => {
+    if (!opts.confirmed) return;
+    opts.confirmed = false; go.textContent = submitLabel; $('.form-alert.warn', form)?.setAttribute('hidden', '');
   });
   dlg.showModal();
   $('input:not([type=checkbox]), textarea, select', form)?.focus();
@@ -370,41 +461,70 @@ function formDialog(html, submitLabel, onSubmit, { danger = false } = {}) {
 // Move a deal, asking for whatever the target stage requires first.
 function moveDeal(a, to, after = afterAction) {
   if (to === a.deal.stage) return;
+  if (isBackwardMove(a.deal.stage, to)) return moveBack(a, to, after);
   const gates = gatesBetween(a.deal.stage, to);
-  const post = (fields) => api(`/api/accounts/${a.id}/deal-stage`, { method: 'POST', body: { stage: to, fields, tz: browserTz() } }).then(after);
+  const post = (fields, o = {}) => api(`/api/accounts/${a.id}/deal-stage`, { method: 'POST', body: { stage: to, fields, ...dealBase(a), ...o } }).then(after);
   const G = state.meta.stageGates;
   if (to === 'closedwon') {
-    return formDialog(`<h2>Close ${esc(a.name)} as won?</h2>
+    return formDialog(`<h2>Close ${esc(a.name)} as won?</h2>${editNote(a)}
       ${gates.length ? `<p class="muted small mb-2">A couple of details first. They're saved to HubSpot.</p>${gateFieldsHtml(a, gates)}` : ''}
       <p class="muted small mt-3 mb-2">Then the onboarding automation runs:</p>
       <ul class="small plain-list"><li>HubSpot deal → <b>Closed won</b></li><li>Slack: announce in <span class="mono">#deals</span>, create <span class="mono">#onb-${esc(a.id)}</span> with the checklist</li><li>Jira: onboarding epic in <span class="mono">ONB</span></li></ul>`,
-      'Close won', (form) => { const m = gateCheck(form, gates); if (m) throw new Error(m); return post(collectGate(form, gates)); });
+      'Close won', (form, o) => { const m = gateCheck(form, gates); if (m) throw m; return post(collectGate(form, gates), o); });
   }
   if (!gates.length) return run(null, () => post({}));
   const last = G[gates.at(-1)];
   const form = formDialog(`<h2>${esc(to === 'closedlost' ? `${a.name}: ${last.title.toLowerCase()}` : `Move ${a.name} to ${stageName(to)}`)}</h2>
-    <p class="muted small mb-3">${esc(last.why)} Prefilled from HubSpot; your answers are saved back to the deal.</p>
+    ${editNote(a)}<p class="muted small mb-3">${esc(last.why)} Prefilled from HubSpot; your answers are saved back to the deal.</p>
     ${gateFieldsHtml(a, gates)}
     ${gates.includes('presentationscheduled') ? `<label class="check-pill invite-opt"><input type="checkbox" name="sendInvite" checked /> ${icon('i-video')}Send a calendar invite with a Google Meet link to ${esc(a.contact?.name ?? 'the prospect')} and the Solutions Engineer</label>` : ''}`,
     to === 'closedlost' ? 'Mark as lost' : `Move to ${stageName(to)}`,
-    (f) => { const m = gateCheck(f, gates); if (m) throw new Error(m); return post(collectGate(f, gates)); },
+    (f, o) => { const m = gateCheck(f, gates); if (m) throw m; return post(collectGate(f, gates), o); },
     { danger: to === 'closedlost' });
   return form;
 }
 
+// Deals only move forward. Back (or out of Closed won/lost) is for an admin: others send a request with the reason.
+const CLOSED_STAGES = ['closedwon', 'closedlost'];
+function isBackwardMove(from, to) {
+  if (from === to) return false;
+  if (CLOSED_STAGES.includes(from)) return true;
+  const open = state.meta.stages.map((s) => s.id).filter((id) => !CLOSED_STAGES.includes(id));
+  return !CLOSED_STAGES.includes(to) && open.indexOf(to) < open.indexOf(from);
+}
+function moveBack(a, to, after = afterAction) {
+  const reasonFields = `<div class="field"><label for="mb-reason">Reason</label><select class="input" id="mb-reason" name="reason" required><option value="">Choose…</option>${state.meta.moveBackReasons.map((r) => `<option>${esc(r)}</option>`).join('')}</select></div>
+    <div class="field"><label for="mb-note">Note <span class="muted xs">(needed if “Other”)</span></label><textarea class="input" id="mb-note" name="note" rows="2" maxlength="500" data-missing="For “Other”, tell the admin in a line what happened." placeholder="A line on what happened"></textarea></div>`;
+  let form;
+  if (isAdmin()) {
+    form = formDialog(`<h2>Move ${esc(a.name)} back to ${esc(stageName(to))}?</h2>${editNote(a)}
+      <p class="muted small mb-3">Deals normally only move forward. The reason is saved to HubSpot${a.deal.stage === 'closedwon' ? ', and onboarding stays as it is' : ''}.</p>${reasonFields}`,
+      `Move back to ${stageName(to)}`, (f, o) => api(`/api/accounts/${a.id}/deal-stage`, { method: 'POST', body: { stage: to, fields: {}, reason: f.reason.value, note: f.note.value, ...dealBase(a), ...o } }).then(after));
+  } else if (a.moveBackRequest) {
+    return toast(`${esc(a.moveBackRequest.by)} already asked the admin to move ${esc(a.name)} back to ${esc(stageName(a.moveBackRequest.to))}. It stays in ${esc(stageName(a.deal.stage))} until they decide.`, { tone: 'info' });
+  } else {
+    form = formDialog(`<h2>Move ${esc(a.name)} back to ${esc(stageName(to))}?</h2>
+      <p class="muted small mb-3">Deals only move forward, so moving one back goes through an admin. Tell them why: they get it in Slack and can move it with one click.</p>${reasonFields}`,
+      'Send to the admin', (f) => api(`/api/accounts/${a.id}/move-back`, { method: 'POST', body: { to, reason: f.reason.value, note: f.note.value } }).then(after));
+  }
+  // "Other" needs a note
+  form.reason.addEventListener('change', () => { form.note.required = form.reason.value === 'Other'; });
+  return form;
+}
+
 function editDealDetails(a, gates, after = afterAction) {
-  formDialog(`<h2>${esc(a.name)}: deal details</h2>
+  formDialog(`<h2>${esc(a.name)}: deal details</h2>${editNote(a)}
     <p class="muted small mb-3">Needed for the stage it's in. Saved to HubSpot${gates.includes('presentationscheduled') ? ', and the Solutions Engineer gets the demo details in Slack' : ''}.</p>
     ${gateFieldsHtml(a, gates)}`, 'Save details',
-    (f) => { const m = gateCheck(f, gates); if (m) throw new Error(m); return api(`/api/accounts/${a.id}/deal-fields`, { method: 'POST', body: { fields: collectGate(f, gates), tz: browserTz() } }).then(after); });
+    (f, o) => { const m = gateCheck(f, gates); if (m) throw m; return api(`/api/accounts/${a.id}/deal-fields`, { method: 'POST', body: { fields: collectGate(f, gates), ...dealBase(a), ...o } }).then(after); });
 }
 
 function editCloseDate(a, after = afterAction) {
   const soon = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
-  formDialog(`<h2>${esc(a.name)}: close date</h2>
+  formDialog(`<h2>${esc(a.name)}: close date</h2>${editNote(a)}
     <p class="muted small mb-3">Currently ${a.deal.closeDate ? new Date(a.deal.closeDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'not set'}. Pick a date you believe in; the forecast uses it.</p>
-    <div class="field"><label for="cd">New close date</label><input class="input" id="cd" name="closeDate" type="date" required min="${new Date().toISOString().slice(0, 10)}" value="${soon}" /></div>`,
-    'Save to HubSpot', (f) => api(`/api/accounts/${a.id}/deal-fields`, { method: 'POST', body: { fields: { closeDate: f.closeDate.value } } }).then(after));
+    <div class="field"><label for="cd">New close date</label><input class="input" id="cd" name="closeDate" type="date" required min="${new Date().toLocaleDateString('en-CA')}" value="${soon}" /></div>`,
+    'Save to HubSpot', (f, o) => api(`/api/accounts/${a.id}/deal-fields`, { method: 'POST', body: { fields: { closeDate: f.closeDate.value }, ...dealBase(a), ...o } }).then(after));
 }
 
 function writeFollowUp(a, draft, after = afterAction) {
@@ -523,7 +643,7 @@ async function renderPipeline(query = new URLSearchParams()) {
           <div class="col-head"><span>${esc(s.label)}</span><span class="muted num">${items.length} · ${moneyCompact(items.reduce((x, a) => x + a.deal.amount, 0))}</span></div>
           ${items.map((a) => `
             <article class="deal" draggable="true" data-deal="${esc(a.id)}" tabindex="0" aria-label="${esc(a.name)}, ${esc(s.label)}">
-              <div class="spread items-start"><a class="name" href="#/accounts/${esc(a.id)}">${esc(a.name)}</a>${a.pendingApproval ? '<span class="chip warn" title="Discount waiting for approval">Approval</span>' : ''}</div>
+              <div class="spread items-start"><a class="name" href="#/accounts/${esc(a.id)}">${esc(a.name)}</a>${a.pendingApproval ? '<span class="chip warn" title="Discount waiting for approval">Approval</span>' : ''}${a.moveBackRequest ? `<span class="chip info" title="${esc(a.moveBackRequest.by)} asked the admin to move it back to ${esc(stageName(a.moveBackRequest.to))}">Move back asked</span>` : ''}</div>
               <div class="muted xs">${moneyCompact(a.deal.amount)} ARR · ${a.properties} ${a.properties === 1 ? 'property' : 'properties'}${team ? ` · ${esc(a.owner)}` : ''}</div>
               <div class="xs deal-meta"><span>${a.deal.closeDate ? `Closes ${closeCell(a)}` : ''}</span><span>Reply ${replyCell(a)}</span></div>
               <div class="deal-sa">${saCell(a)}${state.plOpen?.has(a.id) ? `<div class="sa-list">${suggestions(a).slice(1).map((x) => saCard(a, x)).join('')}</div>` : ''}</div>
@@ -768,7 +888,7 @@ function openMeetDialog(a, after = afterAction) {
       <button type="button" class="sel" data-when="now" aria-pressed="true">Now</button>
       <button type="button" data-when="later" aria-pressed="false">Schedule</button>
     </div>
-    <div class="field when-later" hidden><label for="mt-start">Date and time</label><input class="input" id="mt-start" name="start" type="datetime-local" value="${toLocalInput(tomorrow)}" /></div>
+    <div class="field when-later" hidden><label for="mt-start">Date and time</label><input class="input" id="mt-start" name="start" type="datetime-local" required min="${toLocalInput(new Date())}" value="${toLocalInput(tomorrow)}" /></div>
     <div class="field"><label for="mt-len">Length</label><select class="input" id="mt-len" name="minutes">${[15, 30, 45, 60].map((m) => `<option value="${m}" ${m === (me.team === 'support' ? 15 : 30) ? 'selected' : ''}>${m} minutes</option>`).join('')}</select></div>
     <div class="field"><span class="flabel">Invite</span><div class="checks">
       <label class="check-pill"><input type="checkbox" name="contact" checked /> ${esc(a.contact.name)} <span class="muted xs">${esc(a.contact.role)}</span></label>
@@ -777,12 +897,12 @@ function openMeetDialog(a, after = afterAction) {
     <div class="field"><label for="mt-title">Title</label><input class="input" id="mt-title" name="title" value="${esc(title)}" required /></div>
     <div class="field"><label for="mt-agenda">Agenda <span class="muted xs">(optional)</span></label><textarea class="input" id="mt-agenda" name="agenda" rows="2"></textarea></div>
     <p class="muted small">Google Calendar emails the invite with a Meet link, and the meeting is logged in HubSpot.</p>`,
-    'Start the call', async (f) => {
+    'Start the call', async (f, o) => {
       const later = !$('.when-later', f).hidden;
-      if (later && !f.start.value) throw new Error('Pick a date and time.');
+      if (later && !f.start.value) throw Object.assign(new Error('Pick a date and time.'), { field: 'start' });
       result = await api(`/api/accounts/${a.id}/meetings`, { method: 'POST', body: {
         title: f.title.value, start: later ? new Date(f.start.value).toISOString() : null, minutes: Number(f.minutes.value),
-        withContact: f.contact.checked, team: $$('input[name="team"]:checked', f).map((x) => x.value), agenda: f.agenda.value, tz: browserTz(),
+        withContact: f.contact.checked, team: $$('input[name="team"]:checked', f).map((x) => x.value), agenda: f.agenda.value, tz: browserTz(), confirmed: o.confirmed,
       } });
       result.later = later;
       await after();
@@ -1103,7 +1223,7 @@ async function renderAccount(id, query = new URLSearchParams()) {
   $('#discount')?.addEventListener('click', () => openModal(`
     <h2>Request a discount</h2>
     <div class="field"><label for="pct">Discount %</label><input class="input" id="pct" name="pct" type="number" min="1" max="50" value="10" required /></div>
-    <div class="field"><label for="reason">Reason</label><textarea class="input" id="reason" name="reason" rows="3" placeholder="Why does this deal need it?"></textarea></div>
+    <div class="field"><label for="reason">Reason <span class="muted xs">(optional, helps the approver)</span></label><textarea class="input" id="reason" name="reason" rows="3" maxlength="500" placeholder="Why does this deal need it?"></textarea></div>
     <p class="muted small">Up to ${state.meta.config.discountApprovalThreshold}% is applied in HubSpot right away. Above that, a manager approves it in Slack <span class="mono">#deal-desk</span>.</p>`,
     'Submit', async (data) => {
       await api(`/api/accounts/${id}/discount`, { method: 'POST', body: data });
@@ -1125,7 +1245,7 @@ async function renderAccount(id, query = new URLSearchParams()) {
   $('#new-ticket')?.addEventListener('click', () => openModal(`
     <h2>New Jira ticket · ${esc(a.name)}</h2>
     <div class="field"><label for="t-sum">Summary</label><input class="input" id="t-sum" name="summary" required /></div>
-    <div class="field"><label for="t-desc">Description</label><textarea class="input" id="t-desc" name="description" rows="3"></textarea></div>
+    <div class="field"><label for="t-desc">Description <span class="muted xs">(optional)</span></label><textarea class="input" id="t-desc" name="description" rows="3" maxlength="2000"></textarea></div>
     <div class="field"><label for="t-pri">Priority</label><select class="input" id="t-pri" name="priority"><option>Low</option><option selected>Medium</option><option>High</option><option>Highest</option></select></div>`,
     'Create', (data) => api(`/api/accounts/${id}/tickets`, { method: 'POST', body: data }).then(() => route({ keepScroll: true }))));
 
@@ -1422,7 +1542,7 @@ async function renderConversation(id) {
     let link = null;
     formDialog(`<h2>Video call with ${esc(who.split(' ')[0])}</h2>
       <p class="muted small mb-3">Creates a Google Meet link and sends it to ${esc(who)} as your reply.</p>
-      <div class="field"><label for="vc-text">Message</label><textarea class="input" id="vc-text" name="text" rows="3">It might be quicker to talk this through. Can you join me on a short video call?</textarea></div>
+      <div class="field"><label for="vc-text">Message</label><textarea class="input" id="vc-text" name="text" rows="3" required maxlength="2000">It might be quicker to talk this through. Can you join me on a short video call?</textarea></div>
       <p class="muted xs">The link is added under your message.</p>`,
       'Send the link', async (f) => { link = (await api(`/api/conversations/${sel.id}/call`, { method: 'POST', body: { text: f.text.value } })).link; await route({ keepScroll: true }); });
     $('#modal').addEventListener('close', () => { if (link) setTimeout(() => meetingReady(link, 'Link sent', `${who} got the link in the conversation. Join now and wait for them to hop in.`), 0); }, { once: true });
@@ -1876,14 +1996,19 @@ POST ${esc(origin)}/webhooks/jira       # Jira: issue updated (feature request s
 // ---------- modal ----------
 function openModal(html, submitLabel, onSubmit) {
   const dlg = $('#modal');
-  dlg.innerHTML = `<form method="dialog">${html}
+  dlg.innerHTML = `<form method="dialog" novalidate>${html}<div class="form-alert" role="status" hidden></div><p class="form-error" role="alert" hidden></p>
     <div class="dialog-actions">${submitLabel ? `<button class="btn primary" value="ok">${esc(submitLabel)}</button>` : ''}<button class="btn" value="cancel" formnovalidate>${submitLabel ? 'Cancel' : 'Done'}</button></div></form>`;
   const form = $('form', dlg);
+  if (submitLabel) markRequired(form);
   form.addEventListener('submit', (e) => {
     if (e.submitter?.value !== 'ok') return;
     e.preventDefault();
+    clearErrors(form);
+    if (!clientCheck(form)) return;
     const data = Object.fromEntries(new FormData(form));
-    run(e.submitter, async () => { await onSubmit(data); dlg.close(); });
+    run(e.submitter, async () => {
+      try { await onSubmit(data); dlg.close(); } catch (x) { showFormError(form, x, {}, e.submitter, submitLabel); }
+    });
   });
   dlg.showModal();
   $('input, textarea', dlg)?.focus();

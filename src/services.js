@@ -11,17 +11,18 @@ import * as google from './connectors/google.js';
 import { bus } from './bus.js';
 import { announce, withActivity } from './activity.js';
 import { CLASSIFICATIONS, classify, classificationLabel, fromCloseReason } from './classify.js';
-import { CLOSE_REASONS, CONFIG, DEAL_STAGES, FR_STATUSES, ONBOARDING_STEPS, PEOPLE, STAGE_GATES, USERS, db, findAccount, findAccountByEmail, findConversation } from './store.js';
+import { CLOSE_REASONS, CONFIG, DEAL_STAGES, MOVE_BACK_REASONS, FR_STATUSES, ONBOARDING_STEPS, PEOPLE, STAGE_GATES, USERS, db, findAccount, findAccountByEmail, findConversation } from './store.js';
 import { gatesBetween, missingFields } from './deals.js';
 import { anomalyText, computeHealth } from './health.js';
 
 export class HttpError extends Error {
-  constructor(status, message) { super(message); this.status = status; }
+  // extra: { field } points the UI at the input to fix; { code, ... } drives special pop-ups (confirm, stale, needs-admin)
+  constructor(status, message, extra = {}) { super(message); this.status = status; this.extra = extra; }
 }
 
 const now = () => new Date().toISOString();
 const money = (n) => '$' + Number(n).toLocaleString('en-US');
-const need = (cond, status, msg) => { if (!cond) throw new HttpError(status, msg); };
+const need = (cond, status, msg, extra) => { if (!cond) throw new HttpError(status, msg, extra); };
 const hubUrl = (path) => `${process.env.PUBLIC_URL || 'http://localhost:3000'}/#${path}`;
 
 function getAccount(id) {
@@ -74,13 +75,93 @@ function applyFields(a, fields) {
 }
 const seOf = (name) => PEOPLE.solutionsEngineers.find((p) => p.name === name);
 
+// ---- data integrity: every rule the forms show is enforced here too, with one clear message per problem
+const dayIn = (tz) => { try { return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date()); } catch { return new Date().toISOString().slice(0, 10); } };
+const fmtDay = (ymd) => new Date(`${ymd.slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+const MAX_LEN = { textarea: 2000, text: 200 };
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Throws on anything impossible; returns soft warnings (things that are unusual but can be right).
+function checkDealFields(a, incoming, tz = 'UTC') {
+  const bad = (field, msg) => { throw new HttpError(400, msg, { field }); };
+  const warnings = [];
+  for (const [k, v] of Object.entries(incoming)) {
+    const f = GATE_FIELDS[k];
+    if (typeof v === 'string' && MAX_LEN[f.type] && v.length > MAX_LEN[f.type]) bad(k, `${f.label} is too long. Please keep it under ${MAX_LEN[f.type]} characters.`);
+  }
+  // Only values the user changed are checked against today (a demo that already happened can stay on record)
+  const stored = { closeDate: a.deal.closeDate?.slice(0, 10) ?? '', demoDate: a.deal.fields.demoDate ?? '' };
+  const changedNow = (k) => k in incoming && incoming[k] !== stored[k];
+  if (changedNow('closeDate') && incoming.closeDate) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(incoming.closeDate) || Number.isNaN(+new Date(incoming.closeDate))) bad('closeDate', 'Please pick a valid close date.');
+    if (incoming.closeDate < dayIn(tz)) bad('closeDate', `The close date (${fmtDay(incoming.closeDate)}) is in the past. Please pick today or a later date.`);
+  }
+  if (changedNow('demoDate') && incoming.demoDate) {
+    const at = new Date(`${incoming.demoDate}:00Z`);
+    if (Number.isNaN(+at)) bad('demoDate', 'Please pick a valid demo date and time.');
+    if (+at < Date.now() - 10 * 60_000) bad('demoDate', 'The demo date is in the past. Please pick an upcoming date and time.');
+  }
+  // The demo has to happen before the deal can close
+  const demo = 'demoDate' in incoming ? incoming.demoDate : a.deal.fields.demoDate;
+  const close = 'closeDate' in incoming ? incoming.closeDate : a.deal.closeDate?.slice(0, 10);
+  if (demo && close && demo.slice(0, 10) > close && (changedNow('demoDate') || changedNow('closeDate'))) {
+    if (changedNow('demoDate')) bad('demoDate', `The demo date (${fmtDay(demo)}) is after the close date (${fmtDay(close)}). Please set a correct one.`);
+    bad('closeDate', `The close date (${fmtDay(close)}) is before the demo (${fmtDay(demo)}). Please set a correct one.`);
+  }
+  if ('properties' in incoming && incoming.properties !== '') {
+    const n = incoming.properties;
+    if (!Number.isInteger(n) || n < 1) bad('properties', 'Properties in scope should be a whole number, at least 1.');
+    if (a.properties && n > a.properties) bad('properties', `Properties in scope (${n}) is more than the ${a.properties} properties ${a.name} has. Please check the number.`);
+  }
+  if ('businessValue' in incoming && incoming.businessValue !== '') {
+    const v = incoming.businessValue;
+    if (!(v > 0)) bad('businessValue', 'Business value should be more than $0.');
+    if (v > 100_000_000) bad('businessValue', "That business value looks too high. Please check the number (it's $ per year).");
+    if (v < a.deal.amount) warnings.push({ field: 'businessValue', message: `The business value (${money(v)}) is under the deal's ARR (${money(a.deal.amount)}). Customers rarely buy when the value is below the price.` });
+  }
+  if (incoming.legalContact && incoming.legalContact.includes('@') && !EMAIL.test(incoming.legalContact)) bad('legalContact', "That legal contact email doesn't look right. Please check it.");
+  for (const k of ['signer', 'champion', 'decisionMaker']) if (incoming[k] && incoming[k].length < 2) bad(k, `Please enter the ${GATE_FIELDS[k].label.toLowerCase()}'s name.`);
+  return warnings;
+}
+// Unusual but possible: the user confirms once, then we save.
+const confirmOrThrow = (warnings, confirmed) => {
+  if (warnings.length && !confirmed) throw new HttpError(409, warnings.map((w) => w.message).join(' '), { code: 'confirm', warnings, field: warnings[0].field });
+};
+
+// Someone else changed this deal after you opened the form: say who, when and what, instead of overwriting.
+function checkFresh(a, baseVersion, actor, force) {
+  if (baseVersion == null || force || Number(baseVersion) === a.deal.version || a.deal.editedBy === actor) return;
+  throw new HttpError(409, `${a.deal.editedBy} changed this deal while you were editing.`, { code: 'stale', by: a.deal.editedBy, at: a.deal.editedAt, what: a.deal.lastChange });
+}
+function touchDeal(a, actor, what) {
+  a.deal.version = (a.deal.version ?? 1) + 1;
+  Object.assign(a.deal, { editedBy: actor, editedAt: now(), lastChange: what });
+}
+
+// Deals only move forward. Back (or out of Closed won/lost) is admin-only.
+const OPEN_ORDER = DEAL_STAGES.map((s) => s.id).filter((id) => !['closedwon', 'closedlost'].includes(id));
+const isClosedStage = (id) => id === 'closedwon' || id === 'closedlost';
+export function isBackward(from, to) {
+  if (from === to) return false;
+  if (isClosedStage(from)) return true;
+  return !isClosedStage(to) && OPEN_ORDER.indexOf(to) < OPEN_ORDER.indexOf(from);
+}
+const isAdminName = (name) => USERS.find((u) => u.name === name)?.access === 'admin';
+const admins = () => USERS.filter((u) => u.access === 'admin');
+const reasonText = (reason, note) => `${reason}${note ? `: ${note}` : ''}`;
+function checkReason(reason, note) {
+  need(MOVE_BACK_REASONS.includes(reason), 400, 'Pick a reason for moving the deal back.', { field: 'reason' });
+  need(reason !== 'Other' || note?.trim(), 400, 'Tell the admin a bit more in the note.', { field: 'note' });
+  need(!note || note.length <= 500, 400, 'Please keep the note under 500 characters.', { field: 'note' });
+}
+
 // The demo invite: prospect + SE + AE, with a Meet link, from the fields the Demo pop-up asked for.
 async function bookDemo(a, actor, tz) {
   const f = a.deal.fields;
   const at = f.demoDate ? new Date(`${f.demoDate}:00Z`) : null;
   if (!at || +at < Date.now()) return null; // no date, or already in the past: nothing to invite to
   const { meeting } = await scheduleMeeting(a.id, {
-    title: `Frontline demo: ${a.name}`, start: at.toISOString(), minutes: 45, tz,
+    title: `Frontline demo: ${a.name}`, start: at.toISOString(), minutes: 45, tz, confirmed: true,
     team: [f.se, a.owner].filter(Boolean), withContact: true,
     agenda: `What we'll show: ${(f.useCases ?? []).join(', ') || 'to be agreed'}\nAttendees: ${f.attendees || 'to be confirmed'}\nERP: ${f.erp || 'n/a'} · ${a.properties} properties`,
   }, actor);
@@ -101,15 +182,22 @@ async function loopInSe(a, actor, tz = 'UTC') {
   return se;
 }
 
-export async function changeDealStage(accountId, stage, actor, fields = {}, tz = 'UTC') {
+export async function changeDealStage(accountId, stage, actor, fields = {}, tz = 'UTC', { reason, note, baseVersion, force, confirmed } = {}) {
   const a = getAccount(accountId);
   need(DEAL_STAGES.some((s) => s.id === stage), 400, 'Invalid stage');
   if (stage === a.deal.stage) return { account: a };
+  checkFresh(a, baseVersion, actor, force);
+  const back = isBackward(a.deal.stage, stage);
+  if (back) {
+    need(isAdminName(actor), 403, `Deals only move forward. To move ${a.name} back to ${stageLabel(stage)}, send the admin a request with the reason.`, { code: 'needs-admin' });
+    checkReason(reason, note);
+  }
   const pending = db.approvals.find((p) => p.accountId === a.id && p.status === 'pending');
   need(!(stage === 'closedwon' && pending), 409, 'A discount approval is still pending for this deal');
   const incoming = cleanFields(fields);
   const missing = missingFields(a, gatesBetween(a.deal.stage, stage), incoming);
-  need(!missing.length, 400, `Please fill in: ${missing.map((f) => f.label.toLowerCase()).join(', ')}.`);
+  need(!missing.length, 400, `Please fill in: ${missing.map((f) => f.label.toLowerCase()).join(', ')}.`, { field: missing[0]?.id });
+  confirmOrThrow(checkDealFields(a, incoming, tz), confirmed);
 
   const seBefore = a.deal.fields.se;
   failIfRejected(await hubspot.updateDeal(a.deal.id, { dealstage: stage, ...hsProps(incoming) }, 'Update deal stage',
@@ -118,9 +206,16 @@ export async function changeDealStage(accountId, stage, actor, fields = {}, tz =
   a.deal.stage = stage;
   a.deal.stageEnteredAt = now();
   applyFields(a, incoming);
-  await track('deal.stage_changed', a.id, actor, { from, to: stage, ...(stage === 'closedlost' ? { reason: a.deal.fields.lostReason, competitor: a.deal.fields.competitor || null } : {}) });
+  touchDeal(a, actor, `moved it to ${stageLabel(stage)}`);
+  await track('deal.stage_changed', a.id, actor, { from, to: stage, ...(back ? { movedBack: true, reason: reasonText(reason, note) } : {}), ...(stage === 'closedlost' ? { reason: a.deal.fields.lostReason, competitor: a.deal.fields.competitor || null } : {}) });
 
-  if (stage === 'closedwon') {
+  if (back) {
+    await hubspot.createNote(a.hubspotCompanyId, `Deal moved back from ${stageLabel(from)} to ${stageLabel(stage)} by ${actor}. Reason: ${reasonText(reason, note)}`);
+    announce(`${a.name} moved back from ${stageLabel(from)} to ${stageLabel(stage)}. The reason is noted in HubSpot.${from === 'closedwon' ? ' Onboarding stays as it is.' : ''}`, { icon: 'i-arrow', accountId: a.id });
+  } else if (stage === 'closedwon' && a.onboarding) {
+    // Won again after a reopen: onboarding already exists, so nothing is created twice
+    announce(`${a.name} is back to Closed won. Onboarding was already set up, so nothing was created twice.`, { icon: 'i-rocket', accountId: a.id });
+  } else if (stage === 'closedwon') {
     await kickOffOnboarding(a, actor);
   } else if (stage === 'closedlost') {
     announce(`${a.name} marked as lost (${a.deal.fields.lostReason}${a.deal.fields.competitor ? `: ${a.deal.fields.competitor}` : ''}). The reason is in HubSpot for the win/loss report.`, { icon: 'i-x', accountId: a.id });
@@ -136,13 +231,18 @@ export async function changeDealStage(accountId, stage, actor, fields = {}, tz =
 }
 
 // Fill in deal details without changing the stage (e.g. a missing SE or a new close date).
-export async function updateDealFields(accountId, fields, actor, tz = 'UTC') {
+export async function updateDealFields(accountId, fields, actor, tz = 'UTC', { baseVersion, force, confirmed } = {}) {
   const a = getAccount(accountId);
   const incoming = cleanFields(fields);
   need(Object.keys(incoming).length, 400, 'Nothing to save');
+  checkFresh(a, baseVersion, actor, force);
+  const missing = Object.keys(incoming).filter((k) => !GATE_FIELDS[k].requiredIf && (incoming[k] === '' || (Array.isArray(incoming[k]) && !incoming[k].length)));
+  need(!missing.length, 400, `Please fill in: ${missing.map((k) => GATE_FIELDS[k].label.toLowerCase()).join(', ')}.`, { field: missing[0] });
+  confirmOrThrow(checkDealFields(a, incoming, tz), confirmed);
   const seBefore = a.deal.fields.se;
   failIfRejected(await hubspot.updateDeal(a.deal.id, hsProps(incoming), 'Update deal details', 'Saved the deal details'));
   applyFields(a, incoming);
+  touchDeal(a, actor, incoming.closeDate && Object.keys(incoming).length === 1 ? `moved the close date to ${fmtDay(incoming.closeDate)}` : 'updated the deal details');
   await track('deal.fields_updated', a.id, actor, { fields: Object.keys(incoming) });
   const se = a.deal.fields.se && a.deal.fields.se !== seBefore ? await loopInSe(a, actor, tz) : null;
   const what = Object.keys(incoming).length === 1 && incoming.closeDate
@@ -151,6 +251,55 @@ export async function updateDealFields(accountId, fields, actor, tz = 'UTC') {
   announce(`${what}${se ? ` ${se.name} (${se.title}) got the demo details in Slack.` : ''}`, { icon: 'i-pen', accountId: a.id });
   changed(a.id);
   return { account: a };
+}
+
+// ---- moving a deal back: the rep asks with a reason, an admin decides (Slack + Good morning)
+export async function requestMoveBack(accountId, { to, reason, note }, actor) {
+  const a = getAccount(accountId);
+  need(DEAL_STAGES.some((s) => s.id === to), 400, 'Invalid stage');
+  need(isBackward(a.deal.stage, to), 400, `${stageLabel(to)} comes after ${stageLabel(a.deal.stage)}, so you can move the deal there yourself.`);
+  note = String(note ?? '').trim();
+  checkReason(reason, note);
+  const open = db.moveRequests.find((r) => r.accountId === a.id && r.status === 'pending');
+  need(!open, 409, `${open?.by} already asked to move ${a.name} back to ${stageLabel(open?.to)}. The admin will decide soon.`);
+  const r = { id: `mv_${Date.now()}`, accountId: a.id, from: a.deal.stage, to, reason, note, by: actor, at: now(), status: 'pending' };
+  for (const ad of admins()) {
+    failIfRejected(await slack.dm(ad.slackId, ad.name, `Move-back request: ${a.name}`, [
+      slack.section(`:leftwards_arrow_with_hook: *${actor} asks to move ${a.name} back* from ${stageLabel(r.from)} to *${stageLabel(to)}*\n*Reason:* ${reasonText(reason, note)}`),
+      slack.context(`<${hubUrl('/home')}|Approve or decline in Frontline Hub>`),
+    ]));
+  }
+  db.moveRequests.unshift(r);
+  await track('deal.move_back_requested', a.id, actor, { from: r.from, to, reason });
+  announce(`Request sent to ${admins().map((x) => x.name).join(' and ')} (Admin) in Slack. ${a.name} stays in ${stageLabel(r.from)} until they decide.`, { icon: 'i-clock', tone: 'info', accountId: a.id });
+  changed(a.id);
+  return { request: r };
+}
+
+export async function decideMoveBack(id, decision, actor) {
+  const r = db.moveRequests.find((x) => x.id === id);
+  need(r, 404, 'Request not found');
+  need(r.status === 'pending', 409, `Already ${r.status}`);
+  need(['approved', 'declined'].includes(decision), 400, 'Invalid decision');
+  need(isAdminName(actor), 403, 'Only an admin can move a deal back.');
+  const a = getAccount(r.accountId);
+  if (decision === 'approved') {
+    if (a.deal.stage !== r.from) {
+      r.status = 'outdated';
+      changed(a.id);
+      throw new HttpError(409, `${a.name} is in ${stageLabel(a.deal.stage)} now, not ${stageLabel(r.from)}, so this request no longer applies.`);
+    }
+    await changeDealStage(a.id, r.to, actor, {}, 'UTC', { reason: r.reason, note: [r.note, `requested by ${r.by}`].filter(Boolean).join(' · ') });
+  }
+  Object.assign(r, { status: decision, decidedBy: actor, decidedAt: now() });
+  const rep = USERS.find((u) => u.name === r.by);
+  if (rep?.slackId) await slack.dm(rep.slackId, rep.name, `Move-back ${decision}: ${a.name}`, [
+    slack.section(decision === 'approved' ? `:white_check_mark: ${actor} moved *${a.name}* back to ${stageLabel(r.to)}.` : `:x: ${actor} kept *${a.name}* in ${stageLabel(r.from)}. Reach out to them if you think it should move back.`),
+  ]);
+  await track(`deal.move_back_${decision}`, a.id, actor, { requestId: r.id });
+  if (decision === 'declined') announce(`${a.name} stays in ${stageLabel(r.from)}. ${r.by} was told in Slack.`, { icon: 'i-x', accountId: a.id });
+  changed(a.id);
+  return { request: r };
 }
 
 export async function sendFollowUp(accountId, { subject, body }, actor) {
@@ -775,7 +924,7 @@ const fmtWhen = (iso, tz = 'UTC') => new Date(iso).toLocaleString('en-US', { wee
 
 // Books a meeting on the organizer's calendar with a Meet link, emails the invite, and logs it in HubSpot.
 // `team` are hub people by name; the account's contact is invited when `withContact` is set.
-export async function scheduleMeeting(accountId, { title, start, minutes = 30, team = [], withContact = true, agenda = '', tz = 'UTC' }, actor) {
+export async function scheduleMeeting(accountId, { title, start, minutes = 30, team = [], withContact = true, agenda = '', tz = 'UTC', confirmed = false }, actor) {
   const a = getAccount(accountId);
   need(title?.trim(), 400, 'Give the meeting a title');
   const startAt = start ? new Date(start) : new Date();
@@ -783,6 +932,12 @@ export async function scheduleMeeting(accountId, { title, start, minutes = 30, t
   need(+startAt > Date.now() - 10 * 60_000, 400, "That time is in the past. Pick a new one, or choose 'Now'.");
   minutes = Math.min(240, Math.max(10, Number(minutes) || 30));
   const endAt = new Date(+startAt + minutes * 60_000);
+  need(title.trim().length <= 150, 400, 'Please keep the title under 150 characters.', { field: 'title' });
+  const clash = a.meetings.find((m) => new Date(m.start) < endAt && new Date(m.end) > startAt);
+  if (clash && !confirmed) {
+    const message = `There's already “${clash.title}” with ${a.name} at ${fmtWhen(new Date(clash.start), tz)}. Book this one anyway?`;
+    throw new HttpError(409, message, { code: 'confirm', warnings: [{ field: 'start', message }], field: 'start' });
+  }
   const organizer = userByName(actor);
   const people = [...new Set([actor, ...team])].map(userByName).filter(Boolean);
   const attendees = [...(withContact ? [{ name: a.contact.name, email: a.contact.email }] : []), ...people.map((p) => ({ name: p.name, email: p.email }))];

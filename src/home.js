@@ -273,6 +273,20 @@ function cs(user) {
 function admin(user) {
   const m = manager(user);
   const actions = [...m.actions];
+  // Deals only move forward; a rep's request to move one back waits here (and in the admin's Slack)
+  for (const r of db.moveRequests.filter((x) => x.status === 'pending')) {
+    const a = db.accounts.find((x) => x.id === r.accountId);
+    const label = (id) => DEAL_STAGES.find((s) => s.id === id)?.label ?? id;
+    const mins = Math.floor((Date.now() - new Date(r.at)) / 60000);
+    actions.push({
+      id: `mv-${r.id}`, priority: 'high', icon: 'i-arrow', sort: -1,
+      title: `Move ${a.name} back to ${label(r.to)}?`,
+      detail: `${r.by}: “${r.reason}${r.note ? `: ${r.note}` : ''}”. It's in ${label(r.from)} now.`,
+      tags: [{ text: mins < 60 ? `Asked ${mins || 1}m ago` : `Asked ${Math.floor(mins / 60)}h ago`, tone: mins >= 120 ? 'warn' : '' }, { text: 'Sales', tone: 'info' }],
+      cta: call('Move it back', `/api/move-requests/${r.id}`, { decision: 'approved' }, `Moved back. ${r.by} was told in Slack`),
+      secondary: call('Decline', `/api/move-requests/${r.id}`, { decision: 'declined' }, `Declined. ${r.by} was told in Slack`),
+    });
+  }
   const convs = db.accounts.flatMap((a) => a.conversations.map((c) => ({ a, c })));
   const snoozed = ({ c }) => c.snoozedUntil && new Date(c.snoozedUntil) > new Date();
   const waiting = convs.filter((x) => awaitingReply(x.c) && !snoozed(x));

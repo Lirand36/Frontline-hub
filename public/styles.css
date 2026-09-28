@@ -968,3 +968,6 @@ dialog h2 { font-family: var(--font-display); font-size: var(--fs-2xl); font-wei
 /* Section rows inside a table read as ledger headings (serif), not as column labels */
 .table .group-row th { font-family: var(--font-display); font-size: var(--fs-xl); font-weight: 400; text-transform: none; letter-spacing: 0; }
 .table .group-row th .sa-more, .table .group-row th .muted, .table .group-row th .xs, .table .group-row th .seg-badge { font-family: var(--font); letter-spacing: 0; text-transform: none; }
+/* With the panel open, the board is a compact list: the suggested actions live in the panel */
+.pl-layout.with-panel .deal-sa { display: none; }
+.pl-layout.with-panel .deal { padding: 10px 0; }

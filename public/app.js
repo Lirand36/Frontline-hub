@@ -36,7 +36,7 @@ const user = () => state.meta.users.find((u) => u.id === $('#user').value) ?? st
 // Access (the server enforces the same rules; see src/access.js)
 const role = () => state.meta.roles[user().access] ?? state.meta.roles.ae;
 const can = (cap) => role().caps.includes('*') || role().caps.includes(cap);
-const PAGE_CAP = { pipeline: 'pipeline.view', approvals: 'approvals.view', inbox: 'inbox.work', portfolio: 'portfolio.view', onboarding: 'onboarding.edit', requests: 'fr.view', accounts: 'accounts.view', log: 'log.view', connections: 'connections.view' };
+const PAGE_CAP = { pipeline: 'pipeline.view', approvals: 'approvals.view', inbox: 'inbox.work', portfolio: 'portfolio.view', onboarding: 'onboarding.edit', requests: 'fr.view', accounts: 'accounts.view', log: 'log.view', ops: 'ops.view', connections: 'connections.view' };
 const isAdmin = () => role().caps.includes('*');
 const canSee = (section) => !PAGE_CAP[section] || can(PAGE_CAP[section]);
 // Deals: AEs work their own, managers and admins the team's.
@@ -162,7 +162,7 @@ function scheduleRender() {
 function connectEvents() {
   const es = new EventSource('/api/events');
   // Raw system calls aren't shown to users; they only refresh the activity log if it's open.
-  es.addEventListener('integration', () => { if (location.hash.startsWith('#/log')) scheduleRender(); });
+  es.addEventListener('integration', () => { if (/^#\/(log|ops)/.test(location.hash)) scheduleRender(); });
   es.addEventListener('activity', (e) => {
     const x = JSON.parse(e.data);
     const byOther = x.actor && x.actor !== user().name;
@@ -186,9 +186,11 @@ async function refreshBadges() {
     b.hidden = !n; b.textContent = n;
     if (up) replay(b, 'bump');
   };
-  const [inbox, approvals, accounts] = await Promise.all([
+  const [inbox, approvals, accounts, ops] = await Promise.all([
     can('inbox.work') ? api('/api/inbox') : [], can('approvals.view') ? api('/api/approvals') : [], can('portfolio.view') ? api('/api/accounts') : [],
+    can('ops.view') ? api('/api/ops') : null,
   ]);
+  if (ops) set('#badge-ops', ops.checks.filter((c) => c.level === 'bad').length);
   set('#badge-inbox', inbox.filter((c) => c.state === 'open').length);
   set('#badge-approvals', approvals.filter((p) => p.status === 'pending').length);
   set('#badge-portfolio', accounts.filter((a) => a.csm === user().name || isAdmin()).reduce((n, a) => n + a.anomalies.length, 0));
@@ -474,7 +476,7 @@ function moveDeal(a, to, after = afterAction) {
   }
   if (!gates.length) return run(null, () => post({}));
   const last = G[gates.at(-1)];
-  const form = formDialog(`<h2>${esc(to === 'closedlost' ? `${a.name}: ${last.title.toLowerCase()}` : `Move ${a.name} to ${stageName(to)}`)}</h2>
+  const form = formDialog(`<h2>${esc(to === 'closedlost' ? `${a.name} · ${last.title.toLowerCase()}` : `Move ${a.name} to ${stageName(to)}`)}</h2>
     ${editNote(a)}<p class="muted small mb-3">${esc(last.why)} Prefilled from HubSpot; your answers are saved back to the deal.</p>
     ${gateFieldsHtml(a, gates)}
     ${gates.includes('presentationscheduled') ? `<label class="check-pill invite-opt"><input type="checkbox" name="sendInvite" checked /> ${icon('i-video')}Send a calendar invite with a Google Meet link to ${esc(a.contact?.name ?? 'the prospect')} and the Solutions Engineer</label>` : ''}`,
@@ -513,7 +515,7 @@ function moveBack(a, to, after = afterAction) {
 }
 
 function editDealDetails(a, gates, after = afterAction) {
-  formDialog(`<h2>${esc(a.name)}: deal details</h2>${editNote(a)}
+  formDialog(`<h2>${esc(a.name)} · deal details</h2>${editNote(a)}
     <p class="muted small mb-3">Needed for the stage it's in. Saved to HubSpot${gates.includes('presentationscheduled') ? ', and the Solutions Engineer gets the demo details in Slack' : ''}.</p>
     ${gateFieldsHtml(a, gates)}`, 'Save details',
     (f, o) => { const m = gateCheck(f, gates); if (m) throw m; return api(`/api/accounts/${a.id}/deal-fields`, { method: 'POST', body: { fields: collectGate(f, gates), ...dealBase(a), ...o } }).then(after); });
@@ -521,7 +523,7 @@ function editDealDetails(a, gates, after = afterAction) {
 
 function editCloseDate(a, after = afterAction) {
   const soon = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
-  formDialog(`<h2>${esc(a.name)}: close date</h2>${editNote(a)}
+  formDialog(`<h2>${esc(a.name)} · close date</h2>${editNote(a)}
     <p class="muted small mb-3">Currently ${a.deal.closeDate ? new Date(a.deal.closeDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'not set'}. Pick a date you believe in; the forecast uses it.</p>
     <div class="field"><label for="cd">New close date</label><input class="input" id="cd" name="closeDate" type="date" required min="${new Date().toLocaleDateString('en-CA')}" value="${soon}" /></div>`,
     'Save to HubSpot', (f, o) => api(`/api/accounts/${a.id}/deal-fields`, { method: 'POST', body: { fields: { closeDate: f.closeDate.value }, ...dealBase(a), ...o } }).then(after));
@@ -1993,6 +1995,69 @@ POST ${esc(origin)}/webhooks/jira       # Jira: issue updated (feature request s
   });
 }
 
+// ---------- ops center (admin) ----------
+// "What needs fixing right now": one row per check, same table language as the rest of the hub.
+// "+N items" opens the items behind a check as cards (like "+N more suggestions"); each links where it's fixed.
+const OPS_LEVEL = { bad: { label: 'Needs attention', tone: 'bad' }, warn: { label: 'Worth a look', tone: 'warn' }, ok: { label: 'All clear', tone: 'good' } };
+// How long something has been open: "48 min", "3 hours", "12 days"
+const ageText = (iso) => { const m = Math.max(1, Math.round((Date.now() - new Date(iso)) / 60000)); return m < 60 ? `${m} min` : m < 1440 ? `${Math.round(m / 60)} ${Math.round(m / 60) === 1 ? 'hour' : 'hours'}` : `${Math.round(m / 1440)} ${Math.round(m / 1440) === 1 ? 'day' : 'days'}`; };
+async function renderOps() {
+  const d = await api('/api/ops');
+  state.opsOpen ??= new Set();
+  state.opsView ??= 'open';
+  const n = (lvl) => d.checks.filter((c) => c.level === lvl).length;
+  const shown = d.checks.filter((c) => state.opsView === 'all' || c.level !== 'ok');
+  const groups = [...new Set(d.checks.map((c) => c.group))];
+  const live = d.connections.filter((c) => c.live).length;
+  const jobText = (j) => `${esc(j.label)}: ${j.lastError ? '<span class="tone-bad">failed</span>' : j.lastRun ? `ran ${relText(j.lastRun)}` : 'starting up'}`;
+  // Items reuse the suggestion card: what's wrong, the detail, and an arrow to where it's fixed
+  const item = (c, i) => `<${i.href ? `a href="${esc(i.href)}"` : 'div'} class="sa t-${c.level === 'bad' ? 'bad' : 'warn'}">
+      <span class="sa-text"><span class="sa-do">${esc(i.text)}</span><span class="sa-why">${esc(i.sub ?? '')}</span></span>
+      ${i.href ? '<svg class="ico sa-go" aria-hidden="true"><use href="#i-arrow"/></svg>' : ''}</${i.href ? 'a' : 'div'}>`;
+  const row = (c) => {
+    const open = state.opsOpen.has(c.id) && c.count;
+    const L = OPS_LEVEL[c.level];
+    return `<tr class="ops-row l-${c.level}" data-key="ops-${esc(c.id)}">
+        <td data-label="Check"><div class="${c.level === 'ok' ? 'muted' : 'fw-600'}">${esc(c.title)}</div><div class="muted xs ops-about">${esc(c.count ? c.about : c.clear)}</div>
+          ${c.count ? `<button class="sa-more" data-opsexpand="${esc(c.id)}" aria-expanded="${Boolean(open)}">${open ? 'Hide items' : `+${c.count} ${c.count === 1 ? 'item' : 'items'}`}</button>` : ''}</td>
+        <td data-label="Status"><span class="chip ${L.tone}"><span class="dot" aria-hidden="true"></span>${L.label}</span></td>
+        <td class="center-col num">${c.count ? `${c.count}<span class="ops-unit"> ${c.count === 1 ? 'item' : 'items'}</span>` : '<span class="muted">–</span>'}</td>
+        <td class="hide-sm small ops-age">${c.oldest ? ageText(c.oldest) : '<span class="muted">–</span>'}</td>
+        <td class="hide-sm small">${esc(c.owner)}</td>
+      </tr>${open ? `<tr class="sa-row"><td colspan="5"><div class="sa-row-head">Items for “${esc(c.title)}”</div><div class="sa-grid">${c.items.map((i) => item(c, i)).join('')}</div></td></tr>` : ''}`;
+  };
+
+  view.innerHTML = `
+    <div class="page-head">
+      <div><h1>Ops center</h1><p class="muted">What needs fixing right now, across the systems and the revenue process. The <a class="link" href="#/log">Activity log</a> shows what already happened.</p></div>
+      <div class="seg seg-inline" role="group" aria-label="Show">${segButtons('opsview', [['open', 'Open issues', n('bad') + n('warn')], ['all', 'All checks', d.checks.length]], state.opsView)}</div>
+    </div>
+    <div class="kpis">
+      <div class="card kpi"><div class="muted small">Needs attention</div><div class="v num ${n('bad') ? 'tone-bad' : ''}">${n('bad')}</div><div class="muted xs">Broken or blocking now</div></div>
+      <div class="card kpi"><div class="muted small">Worth a look</div><div class="v num ${n('warn') ? 'tone-warn' : ''}">${n('warn')}</div><div class="muted xs">Drifting; fix this week</div></div>
+      <div class="card kpi"><div class="muted small">All clear</div><div class="v num">${n('ok')} of ${d.checks.length}</div><div class="muted xs">Checks with nothing to fix</div></div>
+      <div class="card kpi"><div class="muted small">Connections live</div><div class="v num">${live} of ${d.connections.length}</div><div class="muted xs">${live ? 'The rest run in mock mode' : 'All in mock mode'}</div></div>
+    </div>
+    <div class="card ops-strip">
+      <div class="ops-conns">${d.connections.map((c) => `<a class="ops-conn" href="#/connections" title="${c.lastCallAt ? `Last call ${relText(c.lastCallAt)}` : 'No calls yet'}">${src(c.id, c.name)}<span class="xs ${c.failed24h ? 'tone-bad' : 'muted'}">${c.failed24h ? `${c.failed24h} failed` : c.live ? 'Live' : 'Mock'}</span></a>`).join('')}</div>
+      <div class="muted xs ops-jobs">${icon('i-clock', 'inline')}${d.jobs.map(jobText).join(' · ')}</div>
+    </div>
+    <div class="card table-wrap">
+      <table class="table ops-table">
+        <thead><tr><th>Check</th><th>Status</th><th class="center-col">Items</th><th class="hide-sm">Oldest</th><th class="hide-sm">Team</th></tr></thead>
+        ${groups.map((g) => { const rows = shown.filter((c) => c.group === g); return rows.length ? `<tbody><tr class="group-row"><th colspan="5">${esc(g)}</th></tr>${rows.map(row).join('')}</tbody>` : ''; }).join('')
+          || `<tbody><tr><td colspan="5" class="empty">Nothing open. All ${d.checks.length} checks are clear.</td></tr></tbody>`}
+      </table>
+    </div>`;
+
+  $$('[data-opsview]').forEach((b) => b.addEventListener('click', () => { state.opsView = b.dataset.opsview; renderOps(); }));
+  $$('[data-opsexpand]').forEach((b) => b.addEventListener('click', () => {
+    const id = b.dataset.opsexpand;
+    if (state.opsOpen.has(id)) state.opsOpen.delete(id); else state.opsOpen.add(id);
+    renderOps().then(() => $(`[data-opsexpand="${id}"]`)?.focus());
+  }));
+}
+
 // ---------- modal ----------
 function openModal(html, submitLabel, onSubmit) {
   const dlg = $('#modal');
@@ -2195,7 +2260,7 @@ function onKey(e) {
 const motion = { busy: false, lastSa: null };
 const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 const replay = (el, cls) => { el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); el.addEventListener('animationend', () => el.classList.remove(cls), { once: true }); };
-const KEYED = 'tr[data-href], .deal[data-deal], .act[data-id], .gm-action[data-key]';
+const KEYED = 'tr[data-href], tr[data-key], .deal[data-deal], .act[data-id], .gm-action[data-key]';
 const keyOf = (el) => el.dataset.href ?? el.dataset.deal ?? el.dataset.id ?? el.dataset.key;
 const COUNTED = '.kpi .v, .metric .v, .hs-num';
 const countKey = (el, i) => `${el.closest('.kpi, .metric')?.firstElementChild?.textContent.trim() ?? 'n'}#${i}`;
@@ -2277,7 +2342,7 @@ function liftGhost(card, e) {
   setTimeout(() => ghost.remove(), 0);
 }
 
-const TITLES = { home: 'Good morning', pipeline: 'Pipeline', approvals: 'Approvals', inbox: 'Inbox', onboarding: 'Onboarding', portfolio: 'My portfolio', requests: 'Feature requests', accounts: 'Accounts', log: 'Activity log', connections: 'Connections' };
+const TITLES = { home: 'Good morning', pipeline: 'Pipeline', approvals: 'Approvals', inbox: 'Inbox', onboarding: 'Onboarding', portfolio: 'My portfolio', requests: 'Feature requests', accounts: 'Accounts', ops: 'Ops center', log: 'Activity log', connections: 'Connections' };
 let lastSection = null;
 
 // A friendly stop for links to areas outside your role.
@@ -2317,6 +2382,7 @@ async function route({ keepScroll = false } = {}) {
     else if (section === 'requests') await renderRequests();
     else if (section === 'approvals') await renderApprovals();
     else if (section === 'log') await renderLog(query);
+    else if (section === 'ops') await renderOps();
     else if (section === 'connections') renderConnections();
     else if (section === 'pipeline') await renderPipeline(query);
     else await renderHome();

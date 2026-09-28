@@ -36,12 +36,12 @@ const AREAS = {
   inbox: 'support',
   portfolio: 'cs', onboarding: 'cs', anomalies: 'cs', fr: 'cs',
   accounts: 'account', tickets: 'account', meetings: 'account',
-  log: 'system', connections: 'system', system: 'system',
+  log: 'system', ops: 'system', connections: 'system', system: 'system',
 };
 const OWNERS = {
   pipeline: 'Sales', deal: 'Sales', approvals: 'Sales', inbox: 'Support',
   portfolio: 'Customer Success', onboarding: 'Customer Success', anomalies: 'Customer Success',
-  fr: 'Support and Customer Success', tickets: 'Support and Customer Success', log: 'Admin', connections: 'Admin', system: 'Admin',
+  fr: 'Support and Customer Success', tickets: 'Support and Customer Success', log: 'Admin', ops: 'Admin', connections: 'Admin', system: 'Admin',
 };
 export const areaOf = (cap) => AREAS[String(cap).split('.')[0]] ?? 'account';
 

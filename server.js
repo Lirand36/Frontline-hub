@@ -130,7 +130,7 @@ const integrations = () => [
 // One real, harmless call per system to prove the keys work. Slack only for now.
 async function testConnection(id) {
   if (id !== 'slack') throw new svc.HttpError(404, 'No connection test for this system yet');
-  if (!slack.isLive()) return { ok: false, message: 'Not connected yet: add SLACK_BOT_TOKEN in Render → Environment.' };
+  if (!slack.isLive()) return { ok: false, message: "The hub doesn't see SLACK_BOT_TOKEN. Add it in Render → Environment; if it's already there (or in a linked environment group), redeploy: Manual Deploy → Deploy latest commit. Variables load when the hub starts." };
   const r = await slack.authTest();
   if (!r.ok) return { ok: false, message: `Slack said: ${r.response?.error ?? `status ${r.status}`}. Check the bot token.` };
   return { ok: true, message: `Connected to the ${r.response.team} workspace as @${r.response.user}.${slack.dmRedirect() ? ` DMs go to ${slack.dmRedirect()}.` : ' Add SLACK_DM_USER_ID so DMs come to you.'}` };

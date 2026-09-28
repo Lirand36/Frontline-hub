@@ -56,6 +56,8 @@ export const PEOPLE = {
 export const MODULES = ['P2P ordering', 'AP automation (AI invoices)', 'Inventory & par levels', 'Recipe costing', 'ERP integration'];
 export const ERPS = ['NetSuite', 'Sage Intacct', 'QuickBooks', 'Oracle', 'Microsoft Dynamics', 'None / spreadsheets'];
 export const LOST_REASONS = ['Price', 'Went with a competitor', 'No decision / timing', 'Missing feature', 'Other'];
+// Deals only move forward. Moving one back goes through an admin, with one of these reasons.
+export const MOVE_BACK_REASONS = ['Moved by mistake', 'The customer re-opened the evaluation', 'Deal details were wrong', 'Other'];
 
 // Fields a deal needs before it can enter a stage. `hs` is the HubSpot deal property it's written to.
 export const STAGE_GATES = {
@@ -113,7 +115,7 @@ export const USERS = [
   { id: 'ron', email: 'ron.a@frontline.com.invalid', name: 'Ron A.', role: 'Support', team: 'support', access: 'support', intercomAdminId: '5823101' },
   { id: 'tal', email: 'tal.g@frontline.com.invalid', name: 'Tal G.', role: 'Support', team: 'support', access: 'support', intercomAdminId: '5823114' },
   { id: 'dana', email: 'dana.s@frontline.com.invalid', name: 'Dana S.', role: 'Customer Success', team: 'cs', access: 'cs', slackId: 'U04DANAS' },
-  { id: 'alex', email: 'alex.m@frontline.com.invalid', name: 'Alex M.', role: 'Admin', team: 'admin', access: 'admin' },
+  { id: 'alex', email: 'alex.m@frontline.com.invalid', name: 'Alex M.', role: 'Admin', team: 'admin', access: 'admin', slackId: 'U04ALEXM' },
 ];
 
 // 12 weeks of weekly product usage (oldest → newest), as Snowflake's PRODUCT.WEEKLY_USAGE would return it.
@@ -430,7 +432,7 @@ function seedAnomalies() {
   ];
 }
 
-export const db = { accounts: [], approvals: [], featureRequests: [], anomalies: [], wonDeals: [] };
+export const db = { accounts: [], approvals: [], featureRequests: [], anomalies: [], wonDeals: [], moveRequests: [] };
 
 export function reset() {
   db.accounts = [...seedAccounts(), ...seedProspects()];
@@ -438,6 +440,7 @@ export function reset() {
     Object.assign(a.deal, structuredClone(DEAL_EXTRAS[a.id] ?? {}));
     a.deal.fields ??= {};
     a.deal.activities ??= [];
+    a.deal.version = 1; // bumped on every change, so a stale form can be caught
     a.meetings = [];
   }
   const rs = db.accounts.find((a) => a.id === 'riverstone');
@@ -451,6 +454,7 @@ export function reset() {
     }
   }
   db.approvals = seedApprovals();
+  db.moveRequests = [];
   db.featureRequests = seedFeatureRequests();
   db.anomalies = seedAnomalies();
   for (const a of db.accounts) a.health = computeHealth(a, db.anomalies).score;

@@ -52,5 +52,6 @@ const SPECIFIC = {
   'approvals.decide': 'Only the Sales Manager can approve or reject discounts.',
   'fr.edit': 'Customer Success tells customers and updates feature requests.',
   'pipeline.team': "Only the Sales Manager sees the whole team's pipeline.",
+  'deal.moveback': 'Only an admin can move a deal back.',
 };
 export const deniedMessage = (cap) => SPECIFIC[cap] ?? `This is for ${OWNERS[String(cap).split('.')[0]] ?? 'another team'}. Ask an admin if you need access.`;

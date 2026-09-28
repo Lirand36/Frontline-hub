@@ -13,7 +13,7 @@ import * as slack from './src/connectors/slack.js';
 import * as snowflake from './src/connectors/snowflake.js';
 import * as claude from './src/connectors/claude.js';
 import * as google from './src/connectors/google.js';
-import { CLOSE_REASONS, CONFIG, DEAL_STAGES, FR_STATUSES, ONBOARDING_STEPS, PEOPLE, SILENT_DAYS, STAGE_GATES, USERS, db, reset } from './src/store.js';
+import { CLOSE_REASONS, CONFIG, DEAL_STAGES, FR_STATUSES, MOVE_BACK_REASONS, ONBOARDING_STEPS, PEOPLE, SILENT_DAYS, STAGE_GATES, USERS, db, reset } from './src/store.js';
 import { dealView, fieldValue, isOpen } from './src/deals.js';
 import { csView } from './src/cs.js';
 import { HEALTH_WEIGHTS, anomalyText, computeHealth } from './src/health.js';
@@ -83,6 +83,7 @@ const summary = (a) => ({
   openTickets: a.tickets.filter((t) => t.status !== 'Done').length,
   openConversations: a.conversations.filter((c) => c.state === 'open').length,
   pendingApproval: db.approvals.some((p) => p.accountId === a.id && p.status === 'pending'),
+  moveBackRequest: db.moveRequests.find((r) => r.accountId === a.id && r.status === 'pending') ?? null,
   ...healthView(a),
   ...csView(a),
 });
@@ -132,7 +133,8 @@ const GUARDS = [
   ['GET', /^\/api\/feature-requests$/, 'fr.view'],
   ['GET', /^\/api\/approvals$/, 'approvals.view'],
   ['GET', /^\/api\/(log|activity)$/, 'log.view'],
-  ['POST', /^\/api\/accounts\/[\w-]+\/(deal-stage|deal-fields|follow-up|ask-colleague|discount)$/, 'deal.edit'],
+  ['POST', /^\/api\/accounts\/[\w-]+\/(deal-stage|deal-fields|follow-up|ask-colleague|discount|move-back)$/, 'deal.edit'],
+  ['POST', /^\/api\/move-requests\//, 'deal.moveback'], // admin only (no other role has this)
   ['POST', /^\/api\/accounts\/[\w-]+\/notes$/, 'accounts.note'],
   ['POST', /^\/api\/accounts\/[\w-]+\/meetings$/, 'meetings.create'],
   ['POST', /^\/api\/accounts\/[\w-]+\/tickets$/, 'tickets.create'],
@@ -160,7 +162,7 @@ const routes = [
   ['GET', /^\/api\/meta$/, () => ({
     stages: DEAL_STAGES, users: USERS, people: PEOPLE, classifications: CLASSIFICATIONS, frStatuses: FR_STATUSES, healthWeights: HEALTH_WEIGHTS, config: CONFIG, integrations: integrations(), closeReasons: CLOSE_REASONS,
     steps: ONBOARDING_STEPS.map(({ id, label, auto, hint }) => ({ id, label, auto: Boolean(auto), hint })),
-    stageGates: STAGE_GATES, silentDays: SILENT_DAYS, roles: ROLES,
+    stageGates: STAGE_GATES, silentDays: SILENT_DAYS, roles: ROLES, moveBackReasons: MOVE_BACK_REASONS,
   })],
   // Open deals with what each one needs next (see src/deals.js)
   ['GET', /^\/api\/pipeline$/, (req) => db.accounts.filter((a) => isOpen(a) && (can(actorOf(req), 'pipeline.team') || a.owner === actorOf(req).name)).map((a) => ({
@@ -198,8 +200,10 @@ const routes = [
     return CLOSE_REASONS.map((r) => ({ ...r, count: counts[r.id] }));
   }],
 
-  ['POST', /^\/api\/accounts\/([\w-]+)\/deal-stage$/, (req, [id], b) => svc.changeDealStage(id, b.stage, actorOf(req).name, b.fields, b.tz)],
-  ['POST', /^\/api\/accounts\/([\w-]+)\/deal-fields$/, (req, [id], b) => svc.updateDealFields(id, b.fields, actorOf(req).name, b.tz)],
+  ['POST', /^\/api\/accounts\/([\w-]+)\/deal-stage$/, (req, [id], b) => svc.changeDealStage(id, b.stage, actorOf(req).name, b.fields, b.tz, b)],
+  ['POST', /^\/api\/accounts\/([\w-]+)\/deal-fields$/, (req, [id], b) => svc.updateDealFields(id, b.fields, actorOf(req).name, b.tz, b)],
+  ['POST', /^\/api\/accounts\/([\w-]+)\/move-back$/, (req, [id], b) => svc.requestMoveBack(id, b, actorOf(req).name)],
+  ['POST', /^\/api\/move-requests\/([\w-]+)$/, (req, [id], b) => svc.decideMoveBack(id, b.decision, actorOf(req).name)],
   ['POST', /^\/api\/accounts\/([\w-]+)\/follow-up$/, (req, [id], b) => svc.sendFollowUp(id, b, actorOf(req).name)],
   ['POST', /^\/api\/accounts\/([\w-]+)\/ask-colleague$/, (req, [id], b) => svc.askColleague(id, b.wonId, actorOf(req).name)],
   ['POST', /^\/api\/accounts\/([\w-]+)\/discount$/, (req, [id], b) => svc.requestDiscount(id, b, actorOf(req).name)],
@@ -328,7 +332,7 @@ const server = http.createServer(async (req, res) => {
   } catch (err) {
     const status = err.status || 500;
     if (status === 500) console.error(err);
-    json(res, status, { error: err.message });
+    json(res, status, { error: err.message, ...(err.extra ?? {}) });
   }
 });
 

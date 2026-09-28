@@ -19,6 +19,7 @@ import { csView } from './src/cs.js';
 import { HEALTH_WEIGHTS, anomalyText, computeHealth } from './src/health.js';
 import * as svc from './src/services.js';
 import { goodMorning } from './src/home.js';
+import { opsView, runJob } from './src/ops.js';
 import { ROLES, areaOf, can, deniedMessage } from './src/access.js';
 import { CLASSIFICATIONS, classificationLabel, suggestedCloseReason } from './src/classify.js';
 import { withActivity, announce, getActivities, clearActivities, setActor } from './src/activity.js';
@@ -133,6 +134,7 @@ const GUARDS = [
   ['GET', /^\/api\/feature-requests$/, 'fr.view'],
   ['GET', /^\/api\/approvals$/, 'approvals.view'],
   ['GET', /^\/api\/(log|activity)$/, 'log.view'],
+  ['GET', /^\/api\/ops$/, 'ops.view'],
   ['POST', /^\/api\/accounts\/[\w-]+\/(deal-stage|deal-fields|follow-up|ask-colleague|discount|move-back)$/, 'deal.edit'],
   ['POST', /^\/api\/move-requests\//, 'deal.moveback'], // admin only (no other role has this)
   ['POST', /^\/api\/accounts\/[\w-]+\/notes$/, 'accounts.note'],
@@ -189,6 +191,8 @@ const routes = [
   ['GET', /^\/api\/approvals$/, (req) => db.approvals.filter((p) => can(actorOf(req), 'approvals.team') || p.requestedBy === actorOf(req).name).map((p) => ({ ...p, account: summary(db.accounts.find((a) => a.id === p.accountId)) }))],
   ['GET', /^\/api\/log$/, () => getLog()],
   // Activity log: one row per user action, with the plain-language steps it caused
+  // Ops center: what needs fixing right now (src/ops.js)
+  ['GET', /^\/api\/ops$/, () => opsView(integrations())],
   ['GET', /^\/api\/activity$/, () => {
     const steps = getLog();
     return getActivities().map((a) => ({ ...a, steps: steps.filter((e) => e.activityId === a.id).reverse() }));
@@ -336,8 +340,9 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-setInterval(() => svc.checkSla().catch((e) => console.error('SLA check failed', e)), 30_000);
-setInterval(() => withActivity('Snowflake monitor', () => svc.detectAnomalies('Snowflake monitor'), 'cs').catch((e) => console.error('Anomaly check failed', e)), 30 * 60_000);
+// Background jobs report each run to the Ops center, so one that fails or stops shows up there
+setInterval(() => runJob('sla', () => svc.checkSla()).catch((e) => console.error('SLA check failed', e)), 30_000);
+setInterval(() => runJob('anomalies', () => withActivity('Snowflake monitor', () => svc.detectAnomalies('Snowflake monitor'), 'cs')).catch((e) => console.error('Anomaly check failed', e)), 30 * 60_000);
 
 server.listen(PORT, () => {
   console.log(`Frontline Hub → http://localhost:${PORT}`);

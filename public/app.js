@@ -79,7 +79,7 @@ function confirmEscalate() {
   const vp = state.meta.people.vpSupport;
   return confirmDialog({
     title: 'Escalate to engineering?',
-    body: `<p class="muted" style="margin-bottom:8px">This will:</p><ul class="small plain-list">
+    body: `<p class="muted mb-2">This will:</p><ul class="small plain-list">
       <li>Open a high-priority bug in Jira with this conversation attached</li>
       <li>Alert <b>#support-escalations</b> in Slack and notify <b>${esc(vp.name)} (${esc(vp.title)})</b></li>
       <li>Leave an internal note in Intercom so the team sees it</li></ul>`,
@@ -234,8 +234,8 @@ async function renderHome() {
       ${d.kpis.map((k) => `<div class="card kpi"><div class="muted small">${esc(k.label)}</div><div class="v num ${k.tone ? `tone-${k.tone}` : ''}">${esc(k.value)}</div></div>`).join('')}
     </div>
 
-    <div class="spread" style="margin-bottom:10px">
-      <h2>Your next suggested actions <span class="muted" style="font-weight:500">· ${d.actions.length}</span></h2>
+    <div class="spread mb-3">
+      <h2>Your next suggested actions <span class="muted fw-500">· ${d.actions.length}</span></h2>
       ${ctaButton(d.footer)}
     </div>
     <div class="card">
@@ -245,7 +245,7 @@ async function renderHome() {
           <div class="grow">
             <div class="gm-title">${esc(a.title)} ${a.badge ? segBadge(a.badge) : ''}</div>
             <div class="muted small">${esc(a.detail)}</div>
-            ${a.tags.length ? `<div class="row" style="margin-top:6px;gap:4px">${a.tags.map((t) => `<span class="chip ${esc(t.tone)}">${esc(t.text)}</span>`).join('')}</div>` : ''}
+            ${a.tags.length ? `<div class="row mt-2 gap-1">${a.tags.map((t) => `<span class="chip ${esc(t.tone)}">${esc(t.text)}</span>`).join('')}</div>` : ''}
           </div>
           <div class="gm-ctas">${ctaButton(a.secondary)}${ctaButton(a.cta, true)}</div>
         </div>`).join('') || '<div class="empty">Nothing needs you right now.</div>'}
@@ -349,15 +349,15 @@ function moveDeal(a, to, after = () => route({ keepScroll: true })) {
   const G = state.meta.stageGates;
   if (to === 'closedwon') {
     return formDialog(`<h2>Close ${esc(a.name)} as won?</h2>
-      ${gates.length ? `<p class="muted small" style="margin-bottom:8px">A couple of details first. They're saved to HubSpot.</p>${gateFieldsHtml(a, gates)}` : ''}
-      <p class="muted small" style="margin:10px 0 6px">Then the onboarding automation runs:</p>
+      ${gates.length ? `<p class="muted small mb-2">A couple of details first. They're saved to HubSpot.</p>${gateFieldsHtml(a, gates)}` : ''}
+      <p class="muted small mt-3 mb-2">Then the onboarding automation runs:</p>
       <ul class="small plain-list"><li>HubSpot deal → <b>Closed won</b></li><li>Slack: announce in <span class="mono">#deals</span>, create <span class="mono">#onb-${esc(a.id)}</span> with the checklist</li><li>Jira: onboarding epic in <span class="mono">ONB</span></li></ul>`,
       'Close won', (form) => { const m = gateCheck(form, gates); if (m) throw new Error(m); return post(collectGate(form, gates)); });
   }
   if (!gates.length) return run(null, () => post({}));
   const last = G[gates.at(-1)];
   const form = formDialog(`<h2>${esc(to === 'closedlost' ? `${a.name}: ${last.title.toLowerCase()}` : `Move ${a.name} to ${stageName(to)}`)}</h2>
-    <p class="muted small" style="margin-bottom:12px">${esc(last.why)} Prefilled from HubSpot; your answers are saved back to the deal.</p>
+    <p class="muted small mb-3">${esc(last.why)} Prefilled from HubSpot; your answers are saved back to the deal.</p>
     ${gateFieldsHtml(a, gates)}
     ${gates.includes('presentationscheduled') ? `<label class="check-pill invite-opt"><input type="checkbox" name="sendInvite" checked /> ${icon('i-video')}Send a calendar invite with a Google Meet link to ${esc(a.contact?.name ?? 'the prospect')} and the Solutions Engineer</label>` : ''}`,
     to === 'closedlost' ? 'Mark as lost' : `Move to ${stageName(to)}`,
@@ -368,7 +368,7 @@ function moveDeal(a, to, after = () => route({ keepScroll: true })) {
 
 function editDealDetails(a, gates, after = () => route({ keepScroll: true })) {
   formDialog(`<h2>${esc(a.name)}: deal details</h2>
-    <p class="muted small" style="margin-bottom:12px">Needed for the stage it's in. Saved to HubSpot${gates.includes('presentationscheduled') ? ', and the Solutions Engineer gets the demo details in Slack' : ''}.</p>
+    <p class="muted small mb-3">Needed for the stage it's in. Saved to HubSpot${gates.includes('presentationscheduled') ? ', and the Solutions Engineer gets the demo details in Slack' : ''}.</p>
     ${gateFieldsHtml(a, gates)}`, 'Save details',
     (f) => { const m = gateCheck(f, gates); if (m) throw new Error(m); return api(`/api/accounts/${a.id}/deal-fields`, { method: 'POST', body: { fields: collectGate(f, gates), tz: browserTz() } }).then(after); });
 }
@@ -376,7 +376,7 @@ function editDealDetails(a, gates, after = () => route({ keepScroll: true })) {
 function editCloseDate(a, after = () => route({ keepScroll: true })) {
   const soon = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
   formDialog(`<h2>${esc(a.name)}: close date</h2>
-    <p class="muted small" style="margin-bottom:12px">Currently ${a.deal.closeDate ? new Date(a.deal.closeDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'not set'}. Pick a date you believe in; the forecast uses it.</p>
+    <p class="muted small mb-3">Currently ${a.deal.closeDate ? new Date(a.deal.closeDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'not set'}. Pick a date you believe in; the forecast uses it.</p>
     <div class="field"><label for="cd">New close date</label><input class="input" id="cd" name="closeDate" type="date" required min="${new Date().toISOString().slice(0, 10)}" value="${soon}" /></div>`,
     'Save to HubSpot', (f) => api(`/api/accounts/${a.id}/deal-fields`, { method: 'POST', body: { fields: { closeDate: f.closeDate.value } } }).then(after));
 }
@@ -497,7 +497,7 @@ async function renderPipeline(query = new URLSearchParams()) {
           <div class="col-head"><span>${esc(s.label)}</span><span class="muted num">${items.length} · ${moneyCompact(items.reduce((x, a) => x + a.deal.amount, 0))}</span></div>
           ${items.map((a) => `
             <article class="deal" draggable="true" data-deal="${esc(a.id)}" tabindex="0" aria-label="${esc(a.name)}, ${esc(s.label)}">
-              <div class="spread" style="align-items:flex-start"><a class="name" href="#/accounts/${esc(a.id)}">${esc(a.name)}</a>${a.pendingApproval ? '<span class="chip warn" title="Discount waiting for approval">Approval</span>' : ''}</div>
+              <div class="spread items-start"><a class="name" href="#/accounts/${esc(a.id)}">${esc(a.name)}</a>${a.pendingApproval ? '<span class="chip warn" title="Discount waiting for approval">Approval</span>' : ''}</div>
               <div class="muted xs">${moneyCompact(a.deal.amount)} ARR · ${a.properties} ${a.properties === 1 ? 'property' : 'properties'}${team ? ` · ${esc(a.owner)}` : ''}</div>
               <div class="xs deal-meta"><span>${a.deal.closeDate ? `Closes ${closeCell(a)}` : ''}</span><span>Reply ${replyCell(a)}</span></div>
               <div class="deal-sa">${saCell(a)}${state.plOpen?.has(a.id) ? `<div class="sa-list">${suggestions(a).slice(1).map((x) => saCard(a, x)).join('')}</div>` : ''}</div>
@@ -509,7 +509,7 @@ async function renderPipeline(query = new URLSearchParams()) {
       <div class="dz won" data-drop="closedwon">Drop to close won</div>
       <div class="dz lost" data-drop="closedlost">Drop to mark lost</div>
     </div>
-    <p class="muted xs" style="margin-top:6px">Drag a deal to move it. If the next stage needs details (like the demo date and Solutions Engineer), you'll be asked for them first.</p>` : `
+    <p class="muted xs mt-2">Drag a deal to move it. If the next stage needs details (like the demo date and Solutions Engineer), you'll be asked for them first.</p>` : `
     <div class="card table-wrap">
       <table class="table pl-table">
         <thead><tr>${cols.map((c) => {
@@ -605,16 +605,20 @@ function bindBoardDrag(byId) {
   });
 }
 
+// One filter control everywhere: a joined segmented group; counts sit in a small pill like the tabs.
+const segButtons = (attr, items, selected) => items.map(([id, label, count]) =>
+  `<button class="${selected === id ? 'sel' : ''}" data-${attr}="${id}" aria-pressed="${selected === id}">${label}${count != null ? ` <span class="num">${count}</span>` : ''}</button>`).join('');
+
 // ---------- accounts ----------
 const ACCOUNT_COLS = [
   { id: 'name', label: 'Account', val: (a) => a.name.toLowerCase() },
   { id: 'status', label: 'Status', val: (a) => ['Live', 'Onboarding', 'Prospect'].indexOf(a.status) },
-  { id: 'segment', label: 'Segment', val: (a) => a.segment, sm: true },
+  { id: 'segment', label: 'Segment', val: (a) => a.segment, sm: true, opt: 'opt-a' },
   { id: 'properties', label: 'Properties', val: (a) => a.properties, sm: true, center: true },
   { id: 'arr', label: 'ARR', val: (a) => a.deal.amount, sm: true, num: true },
-  { id: 'spend', label: 'Spend via Frontline (30d)', val: (a) => a.usage?.spend30d ?? -1, sm: true, num: true },
+  { id: 'spend', label: 'Spend (30d)', val: (a) => a.usage?.spend30d ?? -1, sm: true, num: true, opt: 'opt-b' },
   { id: 'health', label: 'Health', val: (a) => a.health ?? -1 },
-  { id: 'open', label: 'Open', val: (a) => a.openConversations + a.openTickets, sm: true },
+  { id: 'open', label: 'Open', val: (a) => a.openConversations + a.openTickets, sm: true, opt: 'opt-a' },
 ];
 
 async function renderAccounts() {
@@ -626,24 +630,24 @@ async function renderAccounts() {
   view.innerHTML = `
     <div class="page-head">
       <div><h1>Accounts</h1><p class="muted">Hotel groups: CRM, product usage from Snowflake, and open work, in one row.</p></div>
-      <input class="input" id="q" type="search" placeholder="Filter accounts…" aria-label="Filter accounts" style="max-width:260px" value="${esc(state.acctQ ?? '')}" />
+      <input class="input filter-input" id="q" type="search" placeholder="Filter accounts…" aria-label="Filter accounts" value="${esc(state.acctQ ?? '')}" />
     </div>
     <div class="card table-wrap">
       <table class="table">
         <thead><tr>${ACCOUNT_COLS.map((c) => {
           const on = c.id === state.acctSort.id;
-          return `<th class="${c.sm ? 'hide-sm' : ''} ${c.center ? 'center-col' : c.num ? 'num-col' : ''}" aria-sort="${on ? (state.acctSort.dir === 1 ? 'ascending' : 'descending') : 'none'}"><button class="th-sort" data-sort="${c.id}">${esc(c.label)}<span class="sort-ind" aria-hidden="true">${on ? (state.acctSort.dir === 1 ? '▲' : '▼') : ''}</span></button></th>`;
+          return `<th class="${c.sm ? 'hide-sm' : ''} ${c.opt ?? ''} ${c.center ? 'center-col' : c.num ? 'num-col' : ''}" aria-sort="${on ? (state.acctSort.dir === 1 ? 'ascending' : 'descending') : 'none'}"><button class="th-sort" data-sort="${c.id}">${esc(c.label)}<span class="sort-ind" aria-hidden="true">${on ? (state.acctSort.dir === 1 ? '▲' : '▼') : ''}</span></button></th>`;
         }).join('')}</tr></thead>
         <tbody>${list.map((a) => `
           <tr data-href="#/accounts/${a.id}" data-q="${esc(`${a.name} ${a.domain} ${a.segment} ${a.status}`.toLowerCase())}">
             <td><a class="row-link" href="#/accounts/${a.id}">${esc(a.name)}</a><div class="muted xs">${esc(a.domain)}</div></td>
             <td>${statusChip(a.status)}</td>
-            <td class="hide-sm small">${esc(a.segment)}</td>
+            <td class="hide-sm opt-a small">${esc(a.segment)}</td>
             <td class="hide-sm small num center-col">${a.usage ? `${a.usage.propertiesLive}/` : ''}${a.properties}</td>
             <td class="hide-sm num num-col">${money(a.deal.amount)}</td>
-            <td class="hide-sm num num-col">${a.usage ? moneyCompact(a.usage.spend30d) : '<span class="muted">–</span>'}</td>
+            <td class="hide-sm opt-b num num-col">${a.usage ? moneyCompact(a.usage.spend30d) : '<span class="muted">–</span>'}</td>
             <td>${a.health != null ? riskChip(a.healthLevel, a.health) : '<span class="muted">–</span>'}</td>
-            <td class="hide-sm small">${a.openConversations + a.openTickets ? [a.openConversations && `${a.openConversations} ${a.openConversations === 1 ? 'conversation' : 'conversations'}`, a.openTickets && `${a.openTickets} ${a.openTickets === 1 ? 'ticket' : 'tickets'}`].filter(Boolean).join(' · ') : '<span class="muted">–</span>'}</td>
+            <td class="hide-sm opt-a small">${a.openConversations + a.openTickets ? [a.openConversations && `${a.openConversations} ${a.openConversations === 1 ? 'conversation' : 'conversations'}`, a.openTickets && `${a.openTickets} ${a.openTickets === 1 ? 'ticket' : 'tickets'}`].filter(Boolean).join(' · ') : '<span class="muted">–</span>'}</td>
           </tr>`).join('')}</tbody>
       </table>
       <div class="empty" id="no-match" hidden>No accounts match your filter.</div>
@@ -716,7 +720,7 @@ const fmtMeeting = (iso) => new Date(iso).toLocaleString('en-US', { weekday: 'sh
 // After booking: the link, ready to join or share.
 function meetingReady(link, heading, text) {
   const dlg = $('#modal');
-  dlg.innerHTML = `<form method="dialog"><h2>${esc(heading)}</h2><p class="small" style="margin-bottom:12px">${esc(text)}</p>
+  dlg.innerHTML = `<form method="dialog"><h2>${esc(heading)}</h2><p class="small mb-3">${esc(text)}</p>
     <div class="meet-link">${icon('i-video')}<span class="mono small grow ellipsis">${esc(link.replace('https://', ''))}</span><button type="button" class="btn sm" id="copy-link">Copy</button></div>
     <div class="dialog-actions"><a class="btn primary" href="${esc(link)}" target="_blank" rel="noopener">Join now</a><button class="btn" value="cancel">Done</button></div></form>`;
   $('#copy-link', dlg).addEventListener('click', (e) => { navigator.clipboard?.writeText(link).then(() => { e.target.textContent = 'Copied'; }, () => {}); });
@@ -778,13 +782,13 @@ function meetingsCard(a) {
   const past = (a.meetings ?? []).filter((m) => m.end <= nowIso).slice(-2).reverse();
   const row = (m, isPast) => `<div class="list-item meeting ${isPast ? 'past' : ''}">
       ${icon('i-video')}
-      <div class="grow"><div style="font-weight:500">${esc(m.title)}</div><div class="muted xs">${m.instant && !isPast ? 'Started ' + rel(m.start) : fmtMeeting(m.start)} · ${esc(m.attendees.join(', '))}</div></div>
+      <div class="grow"><div class="fw-500">${esc(m.title)}</div><div class="muted xs">${m.instant && !isPast ? 'Started ' + rel(m.start) : fmtMeeting(m.start)} · ${esc(m.attendees.join(', '))}</div></div>
       ${isPast ? '' : `<a class="btn sm" href="${esc(m.link)}" target="_blank" rel="noopener">Join</a>`}
     </div>`;
   return `<section class="card">
     <div class="card-head"><h2>Meetings</h2>${src('google', 'Google Calendar')}</div>
     ${upcoming.map((m) => row(m, false)).join('') || '<div class="empty small">Nothing booked.</div>'}
-    ${past.length ? `<div class="sa-row-head" style="padding:10px 18px 0">Past</div>${past.map((m) => row(m, true)).join('')}` : ''}
+    ${past.length ? `<div class="sa-row-head past-head">Past</div>${past.map((m) => row(m, true)).join('')}` : ''}
   </section>`;
 }
 
@@ -818,7 +822,7 @@ function healthPanel(a) {
         <div class="parts">
           ${a.healthParts.map((p) => `
             <div class="part">
-              <div class="spread"><span class="small" style="font-weight:500">${esc(p.label)} <span class="muted xs">${Math.round(state.meta.healthWeights[p.id] * 100)}%</span></span><span class="num small tone-${partTone(p.score)}">${p.score}</span></div>
+              <div class="spread"><span class="small fw-500">${esc(p.label)} <span class="muted xs">${Math.round(state.meta.healthWeights[p.id] * 100)}%</span></span><span class="num small tone-${partTone(p.score)}">${p.score}</span></div>
               <div class="bar"><span style="width:${p.score}%;background:var(--${partTone(p.score)})"></span></div>
               <div class="muted xs">${esc(p.detail)}</div>
             </div>`).join('')}
@@ -826,7 +830,7 @@ function healthPanel(a) {
       </section>
     </div>
 
-    <section class="card" style="margin-top:16px">
+    <section class="card mt-4">
       <div class="card-head">
         <div><h2>Weekly usage · last 12 weeks</h2><div class="muted small">From Snowflake. An anomaly is last week vs the 4 weeks before: a drop of 30%+ or an error spike.</div></div>
         ${can('anomalies.edit') ? `<button class="btn sm" data-scan>${icon('i-search')}Check usage now</button>` : ''}
@@ -844,12 +848,12 @@ function healthPanel(a) {
       </div>
     </section>
 
-    <section class="card" style="margin-top:16px">
+    <section class="card mt-4">
       <div class="card-head"><h2>Usage anomalies</h2>${src('snowflake')}</div>
       ${a.allAnomalies.length ? a.allAnomalies.map((x) => `
         <div class="list-item">
-          <svg class="ico tone-${x.severity}" style="width:18px;height:18px"><use href="#i-alert"/></svg>
-          <div class="grow"><div>${esc(x.text)}</div><div class="muted xs">Detected ${rel(x.detectedAt)}${x.reviewedBy ? ` · reviewed by ${esc(x.reviewedBy)}` : ''}</div>${x.note ? `<div class="small" style="margin-top:4px">“${esc(x.note)}”</div>` : ''}</div>
+          <svg class="ico tone-${x.severity} ico-18"><use href="#i-alert"/></svg>
+          <div class="grow"><div>${esc(x.text)}</div><div class="muted xs">Detected ${rel(x.detectedAt)}${x.reviewedBy ? ` · reviewed by ${esc(x.reviewedBy)}` : ''}</div>${x.note ? `<div class="small mt-1">“${esc(x.note)}”</div>` : ''}</div>
           ${x.status === 'new' ? '<span class="chip warn">To review</span>' : '<span class="chip good">Reviewed</span>'}
         </div>`).join('') : '<div class="empty">No anomalies. Usage looks normal.</div>'}
     </section>`;
@@ -874,7 +878,7 @@ function supportPanel(a) {
         ${open.map((c) => `
           <${convTag(c)}>
             <div class="grow">
-              <div style="font-weight:500">${esc(c.subject)}</div>
+              <div class="fw-500">${esc(c.subject)}</div>
               <div class="ii-facts">
                 ${urgency(c) ? `<div class="fact ${urgency(c).tone}"><svg class="ico"><use href="#i-clock"/></svg>${urgency(c).text}</div>` : ''}
                 <div class="fact"><svg class="ico"><use href="#i-tag"/></svg><span class="k">Classification:</span>${esc(c.classificationLabel)}${c.escalatedTo ? ` <span class="mono info-text">· ${esc(c.escalatedTo)}</span>` : ''}</div>
@@ -883,7 +887,7 @@ function supportPanel(a) {
             </div>
             ${can('inbox.work') ? '<svg class="ico muted"><use href="#i-arrow"/></svg>' : ''}
           </${convTag(c).split(' ')[0]}>`).join('') || '<div class="empty">No open conversations.</div>'}
-        <div class="card-head" style="border-top:1px solid var(--border)"><h2>Past conversations</h2></div>
+        <div class="card-head bt"><h2>Past conversations</h2></div>
         ${closed.map((c) => `
           <${convTag(c)}><div class="grow"><div>${esc(c.subject)}</div><div class="muted xs">${esc(c.classificationLabel)} · closed as ${esc(reasonLabel(c.closeReason ?? ''))} · ${rel(c.updatedAt)}</div></div></${convTag(c).split(' ')[0]}>`).join('') || '<div class="empty">None yet.</div>'}
       </section>
@@ -891,7 +895,7 @@ function supportPanel(a) {
         <div class="card-head"><h2>Engineering tickets</h2>${src('jira')}</div>
         ${bugs.map((t) => `
           <div class="list-item">
-            <span class="mono muted" style="min-width:74px">${esc(t.key)}</span>
+            <span class="mono muted key-col">${esc(t.key)}</span>
             <div class="grow">${esc(t.summary)}<div class="muted xs">${rel(t.createdAt)}</div></div>
             ${ticketStatus(t.status)}
           </div>`).join('') || '<div class="empty">No open tickets.</div>'}
@@ -910,8 +914,8 @@ function requestsPanel(a) {
           const mine = f.accounts.find((r) => r.accountId === a.id);
           const others = f.accounts.filter((r) => r.accountId !== a.id);
           return `<tr>
-            <td data-label="Request"><div style="font-weight:500">${esc(f.title)}</div><div class="mono muted xs">${esc(f.jiraKey)}</div></td>
-            <td data-label="Status"><div class="row" style="gap:6px;flex-wrap:nowrap">${frStatus(f.status)}${frSimBtn(f)}</div><div class="muted xs">Updated ${rel(f.updatedAt)}</div></td>
+            <td data-label="Request"><div class="fw-500">${esc(f.title)}</div><div class="mono muted xs">${esc(f.jiraKey)}</div></td>
+            <td data-label="Status"><div class="row gap-1 no-wrap">${frStatus(f.status)}${frSimBtn(f)}</div><div class="muted xs">Updated ${rel(f.updatedAt)}</div></td>
             <td data-label="Asked" class="small">${rel(mine.requestedAt)}</td>
             <td data-label="Also asked by" class="small">${others.length ? `${others.map((r) => `<a class="link" href="#/accounts/${esc(r.accountId)}?tab=requests">${esc(r.name)}</a>`).join(', ')}<div class="muted xs">${moneyCompact(f.arr)} ARR asking in total</div>` : '<span class="muted">No one else yet</span>'}</td>
             <td data-label="Customer">${frCustomerCell(f, mine)}</td>
@@ -951,7 +955,7 @@ async function renderAccount(id, query = new URLSearchParams()) {
     <div class="page-head">
       <div>
         <h1>${esc(a.name)}</h1>
-        <div class="row" style="margin-top:8px">
+        <div class="row mt-2">
           ${statusChip(a.status)}
           <span class="chip">${esc(a.segment)}</span>
           <span class="chip">${a.properties} ${a.properties === 1 ? 'property' : 'properties'} · ${esc(a.region)}</span>
@@ -988,7 +992,7 @@ async function renderAccount(id, query = new URLSearchParams()) {
           </div>
           <div class="deal-foot">
             <div class="row">
-              <span style="font-weight:600" class="num">${money(net)} ARR</span>
+              <span class="num fw-600">${money(net)} ARR</span>
               ${a.deal.discountPct ? `<span class="muted small">list ${money(a.deal.amount)} · −${a.deal.discountPct}%</span>` : ''}
               ${lastDecided && !pending ? `<span class="chip ${lastDecided.status === 'approved' ? 'good' : 'bad'}">${lastDecided.pct}% ${lastDecided.status} by ${esc(lastDecided.decidedBy)}</span>` : ''}
             </div>
@@ -1021,7 +1025,7 @@ async function renderAccount(id, query = new URLSearchParams()) {
       <div class="stack">
         ${meetingsCard(a)}
         <section class="card card-pad">
-          <h2 style="margin-bottom:12px">Primary contact</h2>
+          <h2 class="mb-3">Primary contact</h2>
           <dl class="kv">
             <dt>Name</dt><dd>${esc(a.contact.name)}</dd>
             <dt>Role</dt><dd>${esc(a.contact.role)}</dd>
@@ -1030,25 +1034,25 @@ async function renderAccount(id, query = new URLSearchParams()) {
         </section>
 
         <section class="card card-pad">
-          <div class="spread" style="margin-bottom:14px"><h2>Product usage</h2>${src('snowflake')}</div>
+          <div class="spread mb-3"><h2>Product usage</h2>${src('snowflake')}</div>
           ${a.usage ? `
             <div class="usage">
               <div><div class="muted xs">Properties live</div><div class="v num">${a.usage.propertiesLive} / ${a.properties}</div>
-                <div class="bar" style="margin-top:5px"><span style="width:${Math.round((a.usage.propertiesLive / a.properties) * 100)}%"></span></div></div>
+                <div class="bar mt-1"><span style="width:${Math.round((a.usage.propertiesLive / a.properties) * 100)}%"></span></div></div>
               <div><div class="muted xs">Active users</div><div class="v num">${compact(a.usage.activeUsers)}</div></div>
               <div><div class="muted xs">Purchase orders (30d)</div><div class="v num">${compact(a.usage.pos30d)}</div></div>
               <div><div class="muted xs">AI-processed invoices (30d)</div><div class="v num">${compact(a.usage.invoicesAi30d)}</div></div>
               <div><div class="muted xs">Spend via Frontline (30d)</div><div class="v num">${moneyCompact(a.usage.spend30d)}</div></div>
               <div><div class="muted xs">Vendors connected</div><div class="v num">${compact(a.usage.vendorsConnected)}</div></div>
             </div>
-            <div class="spread" style="margin-top:14px"><span class="muted xs">Last active ${rel(a.usage.lastActive)}</span>
+            <div class="spread mt-3"><span class="muted xs">Last active ${rel(a.usage.lastActive)}</span>
               ${a.onboarding || !can('onboarding.edit') ? '' : `<button class="btn sm" id="sync">${icon('i-reset')}Refresh</button>`}</div>`
           : '<p class="muted small">Prospect: no product usage yet.</p>'}
         </section>
 
         <section class="card">
           <div class="card-head"><h2>Notes</h2>${src('hubspot')}</div>
-          ${a.notes.length ? a.notes.map((n) => `<div class="note">${esc(n.text)}<div class="muted xs" style="margin-top:2px">${esc(n.author)} · ${rel(n.at)}</div></div>`).join('') : '<div class="empty">No notes yet.</div>'}
+          ${a.notes.length ? a.notes.map((n) => `<div class="note">${esc(n.text)}<div class="muted xs mt-1">${esc(n.author)} · ${rel(n.at)}</div></div>`).join('') : '<div class="empty">No notes yet.</div>'}
         </section>
       </div>
     </div>`;
@@ -1153,7 +1157,7 @@ function aiCard(c) {
       <p class="ai-summary">${esc(c.ai.summary)}</p>
       <p class="small"><b>Next step:</b> ${esc(c.ai.next_step)}</p>
       <div class="ai-draft">
-        <div class="spread"><span class="small" style="font-weight:600">Suggested reply</span><button class="btn sm primary" id="ai-use">Use this reply</button></div>
+        <div class="spread"><span class="small fw-600">Suggested reply</span><button class="btn sm primary" id="ai-use">Use this reply</button></div>
         <pre class="draft">${esc(c.ai.suggested_reply)}</pre>
       </div>
       <div class="muted xs">${c.ai.mode === 'live' ? `Claude · ${esc(c.ai.model)}` : 'Mock mode: rules-based stand-in until ANTHROPIC_API_KEY is set'} · ${rel(c.ai.at)}</div>
@@ -1167,11 +1171,11 @@ function snapshotPanel(a, currentId) {
   const syncTone = { ok: 'good', degraded: 'warn', failing: 'bad' }[p?.syncStatus] ?? '';
   return `
     <div class="snap-head">
-      <div class="spread"><h2>Account snapshot</h2><div class="row" style="gap:4px"><a class="link xs" href="#/accounts/${a.id}">Full account →</a><button class="icon-close" data-close-drawer aria-label="Close"><svg class="ico"><use href="#i-x"/></svg></button></div></div>
+      <div class="spread"><h2>Account snapshot</h2><div class="row gap-1"><a class="link xs" href="#/accounts/${a.id}">Full account →</a><button class="icon-close" data-close-drawer aria-label="Close"><svg class="ico"><use href="#i-x"/></svg></button></div></div>
       <div class="snap-name">${esc(a.name)}</div>
-      <div class="row" style="gap:4px;margin-top:6px">${statusChip(a.status)}<span class="chip">${esc(a.segment)}</span><span class="chip">${money(a.deal.amount)} ARR</span></div>
-      <div style="margin-top:10px">${a.health != null ? riskChip(a.healthLevel, a.health) : ''}</div>
-      <div class="muted xs" style="margin-top:6px">CSM ${esc(a.csm)} · AE ${esc(a.owner)} · ${a.properties} properties</div>
+      <div class="row gap-1 mt-2">${statusChip(a.status)}<span class="chip">${esc(a.segment)}</span><span class="chip">${money(a.deal.amount)} ARR</span></div>
+      <div class="mt-3">${a.health != null ? riskChip(a.healthLevel, a.health) : ''}</div>
+      <div class="muted xs mt-2">CSM ${esc(a.csm)} · AE ${esc(a.owner)} · ${a.properties} properties</div>
     </div>
     <div class="snap-sec">
       <div class="spread"><h3>Platform</h3>${src('snowflake')}</div>
@@ -1201,10 +1205,10 @@ const dueTime = (c) => (c.state === 'open' && c.slaDueAt ? new Date(c.slaDueAt).
 const INBOX_COLS = [
   { id: 'customer', label: 'Customer', key: (c) => c.account.name.toLowerCase() },
   { id: 'subject', label: 'Subject', key: (c) => c.subject.toLowerCase() },
-  { id: 'class', label: 'Classification', key: (c) => c.classificationLabel },
+  { id: 'class', label: 'Classification', key: (c) => c.classificationLabel, opt: 'opt-b' },
   { id: 'due', label: 'Reply due', key: dueTime },
   { id: 'owner', label: 'Owner', key: (c) => c.assignee ?? '~' },
-  { id: 'updated', label: 'Last message', key: (c) => -new Date(c.updatedAt).getTime() },
+  { id: 'updated', label: 'Last message', key: (c) => -new Date(c.updatedAt).getTime(), opt: 'opt-a' },
 ];
 
 function inboxQueue(items, me) {
@@ -1249,23 +1253,23 @@ async function renderInboxQueue() {
     <div class="tabs" role="tablist" aria-label="Queues">
       ${INBOX_TABS.map((t) => { const n = items.filter((c) => t.test(c, me.name)).length; return `<button role="tab" class="tab ${t.id === tab.id ? 'sel' : ''}" data-tab="${t.id}" aria-selected="${t.id === tab.id}">${esc(t.label)} <span class="num">${n}</span></button>`; }).join('')}
     </div>
-    ${reasons ? `<div class="card card-pad reasons-card"><div class="muted small" style="margin-bottom:8px">Why customers contacted us</div>
+    ${reasons ? `<div class="card card-pad reasons-card"><div class="muted small mb-2">Why customers contacted us</div>
       ${reasons.filter((r) => r.count).sort((x, y) => y.count - x.count).map((r) => `<div class="rbar"><span class="xs ellipsis">${esc(r.label)}</span><div class="bar"><span style="width:${(r.count / maxReason) * 100}%"></span></div><span class="xs num">${r.count}</span></div>`).join('')}</div>` : ''}
     <div class="card table-wrap">
       <table class="table inbox-table">
         <thead><tr>${INBOX_COLS.map((c) => {
           const on = c.id === sortOn;
           const dir = on && c.id === state.inboxSort.id ? state.inboxSort.dir : 1;
-          return `<th aria-sort="${on ? (dir === 1 ? 'ascending' : 'descending') : 'none'}"><button class="th-sort" data-isort="${c.id}">${esc(c.id === 'due' && tab.id === 'closed' ? 'Outcome' : c.label)}<span class="sort-ind" aria-hidden="true">${on ? (dir === 1 ? '▲' : '▼') : ''}</span></button></th>`;
+          return `<th class="${c.opt ?? ''}" aria-sort="${on ? (dir === 1 ? 'ascending' : 'descending') : 'none'}"><button class="th-sort" data-isort="${c.id}">${esc(c.id === 'due' && tab.id === 'closed' ? 'Outcome' : c.label)}<span class="sort-ind" aria-hidden="true">${on ? (dir === 1 ? '▲' : '▼') : ''}</span></button></th>`;
         }).join('')}</tr></thead>
         <tbody>${list.map((i, n) => `
           <tr data-href="#/inbox/${esc(i.id)}" class="u-${urgency(i)?.tone ?? 'none'} ${n === state.inboxCursor ? 'cursor' : ''} ${i.id === state.flashId ? 'flash' : ''}">
             <td data-label="Customer"><a class="row-link" href="#/inbox/${esc(i.id)}">${esc(i.account.name)}</a> ${segBadge(i.account.segment)}</td>
-            <td data-label="Subject" class="subj"><div class="ellipsis" style="font-weight:500">${esc(i.subject)}</div><div class="muted xs ellipsis">${i.ai && i.ai.forMessages === i.messages.length ? `${icon('i-sparkle', 'inline')}${esc(i.ai.summary)}` : esc(i.messages.at(-1)?.text)}</div></td>
-            <td data-label="Classification" class="small">${esc(i.classificationLabel)}${i.escalatedTo ? `<div class="mono info-text xs">${esc(i.escalatedTo)}</div>` : ''}</td>
+            <td data-label="Subject" class="subj"><div class="ellipsis fw-500">${esc(i.subject)}</div><div class="muted xs ellipsis">${i.ai && i.ai.forMessages === i.messages.length ? `${icon('i-sparkle', 'inline')}${esc(i.ai.summary)}` : esc(i.messages.at(-1)?.text)}</div></td>
+            <td data-label="Classification" class="small opt-b">${esc(i.classificationLabel)}${i.escalatedTo ? `<div class="mono info-text xs">${esc(i.escalatedTo)}</div>` : ''}</td>
             <td data-label="Reply due">${dueCell(i)}</td>
             <td data-label="Owner" class="small ${i.assignee ? '' : 'tone-warn'}">${i.assignee ? esc(i.assignee) : 'Unassigned'}</td>
-            <td data-label="Last message" class="small muted">${rel(i.updatedAt)}</td>
+            <td data-label="Last message" class="small muted opt-a">${rel(i.updatedAt)}</td>
           </tr>`).join('') || `<tr><td colspan="${INBOX_COLS.length}" class="empty">${tab.id === 'mine' ? 'Nothing assigned to you. Check <b>Unassigned</b>.' : 'Nothing here.'}</td></tr>`}</tbody>
       </table>
     </div>`;
@@ -1289,7 +1293,7 @@ function accountStrip(a) {
   const bit = (k, v) => `<span class="as-item"><span class="muted">${k}</span> ${v}</span>`;
   return `<button class="acct-strip" id="open-snap" type="button" aria-haspopup="dialog">
     <svg class="ico" aria-hidden="true"><use href="#i-building"/></svg>
-    <span class="as-item" style="font-weight:600">${esc(a.name)}</span>
+    <span class="as-item fw-600">${esc(a.name)}</span>
     ${a.health != null ? riskChip(a.healthLevel, a.health) : statusChip(a.status)}
     ${bit('ARR', money(a.deal.amount))}
     ${p ? bit(esc(p.erp), `<span class="chip ${syncTone}">${esc(p.syncStatus)}</span>`) : ''}
@@ -1323,8 +1327,8 @@ async function renderConversation(id) {
 
   view.innerHTML = `
     <div class="spread conv-top">
-      <nav class="crumbs" aria-label="Breadcrumb" style="margin:0"><a href="#/inbox">Inbox · ${esc(tab.label)}</a><span aria-hidden="true" class="sep">/</span><span aria-current="page" class="ellipsis">${esc(sel.subject)}</span></nav>
-      <div class="row conv-pager" style="gap:6px">
+      <nav class="crumbs m-0" aria-label="Breadcrumb"><a href="#/inbox">Inbox · ${esc(tab.label)}</a><span aria-hidden="true" class="sep">/</span><span aria-current="page" class="ellipsis">${esc(sel.subject)}</span></nav>
+      <div class="row conv-pager gap-1">
         <a class="btn sm ${prev ? '' : 'disabled'}" ${prev ? `href="#/inbox/${esc(prev.id)}"` : 'aria-disabled="true"'} id="prev" title="Previous (K)">‹ Previous</a>
         <span class="muted small">${pos + 1} of ${list.length}</span>
         <a class="btn sm ${next ? '' : 'disabled'}" ${next ? `href="#/inbox/${esc(next.id)}"` : 'aria-disabled="true"'} id="next" title="Next (J)">Next ›</a>
@@ -1332,7 +1336,7 @@ async function renderConversation(id) {
     </div>
     <div class="card conv">
       <div class="card-head">
-        <div class="grow"><h2>${esc(sel.subject)}</h2><div class="row" style="gap:6px;margin-top:2px"><span class="small">${esc(sel.account.name)}</span>${segBadge(sel.account.segment)}</div></div>
+        <div class="grow"><h2>${esc(sel.subject)}</h2><div class="row gap-1 mt-1"><span class="small">${esc(sel.account.name)}</span>${segBadge(sel.account.segment)}</div></div>
         ${src('intercom', `#${sel.id}`)}
       </div>
       ${accountStrip(account)}
@@ -1390,7 +1394,7 @@ async function renderConversation(id) {
     const who = sel.messages.find((m) => m.from === 'customer')?.author ?? 'the customer';
     let link = null;
     formDialog(`<h2>Video call with ${esc(who.split(' ')[0])}</h2>
-      <p class="muted small" style="margin-bottom:10px">Creates a Google Meet link and sends it to ${esc(who)} as your reply.</p>
+      <p class="muted small mb-3">Creates a Google Meet link and sends it to ${esc(who)} as your reply.</p>
       <div class="field"><label for="vc-text">Message</label><textarea class="input" id="vc-text" name="text" rows="3">It might be quicker to talk this through. Can you join me on a short video call?</textarea></div>
       <p class="muted xs">The link is added under your message.</p>`,
       'Send the link', async (f) => { link = (await api(`/api/conversations/${sel.id}/call`, { method: 'POST', body: { text: f.text.value } })).link; await route({ keepScroll: true }); });
@@ -1407,8 +1411,8 @@ async function renderConversation(id) {
 function bindSimulate() {
   $('#simulate').addEventListener('click', () => openModal(`
     <h2>Simulate a customer message</h2>
-    <p class="muted small" style="margin-bottom:10px">Sends the hub the same notification Intercom sends when a customer writes in.</p>
-    <div class="reasons">${INBOUND_SAMPLES.map((x, i) => `<label class="reason"><input type="radio" name="sample" value="${i}" ${i ? '' : 'checked'} required /><span>${esc(x.label)}<span class="muted xs" style="display:block">“${esc(x.text)}”</span></span></label>`).join('')}</div>`,
+    <p class="muted small mb-3">Sends the hub the same notification Intercom sends when a customer writes in.</p>
+    <div class="reasons">${INBOUND_SAMPLES.map((x, i) => `<label class="reason"><input type="radio" name="sample" value="${i}" ${i ? '' : 'checked'} required /><span>${esc(x.label)}<span class="muted xs block">“${esc(x.text)}”</span></span></label>`).join('')}</div>`,
     'Send message', (data) => simulateInbound(INBOUND_SAMPLES[data.sample])));
 }
 
@@ -1441,7 +1445,7 @@ const renewalCell = (a) => (a.renewalDate ? `<span class="${a.renewalDays <= 90 
 
 // One pop-up per kind of CS action, shared by My portfolio, the Health tab and Good morning.
 function runCsAction(a, x, after = () => route({ keepScroll: true })) {
-  const head = `<div class="muted small">${esc(a.name)}</div><h2 style="margin-top:4px">${esc(x.action)}</h2><p class="small" style="margin-bottom:12px">${esc(x.detail)}</p>`;
+  const head = `<div class="muted small">${esc(a.name)}</div><h2 class="mt-1">${esc(x.action)}</h2><p class="small mb-3">${esc(x.detail)}</p>`;
   if (x.cta.kind === 'anomaly') {
     return formDialog(`${head}<div class="field"><label for="an-note">What did you find? <span class="muted xs">(optional, saved to HubSpot)</span></label><textarea class="input" id="an-note" name="note" rows="3" placeholder="e.g. NetSuite credentials expired; their IT is fixing it today."></textarea></div>`,
       'Mark reviewed', (f) => api(`/api/anomalies/${x.cta.anomalyId}/ack`, { method: 'POST', body: { note: f.note.value } }).then(after));
@@ -1503,15 +1507,15 @@ async function renderPortfolio(query = new URLSearchParams()) {
     </div>
     <div class="card table-wrap">
       <table class="table pf-table">
-        <thead><tr><th>Account</th><th>Health</th><th>What's going on</th><th class="hide-sm">Usage (12 wks)</th><th class="hide-sm">Renewal</th><th>Next suggested action</th></tr></thead>
+        <thead><tr><th>Account</th><th>Health</th><th>What's going on</th><th class="hide-sm opt-a">Usage (12 wks)</th><th class="hide-sm opt-b">Renewal</th><th>Next suggested action</th></tr></thead>
         <tbody>${list.map((a) => {
           const vol = a.usageSeries ? a.usageSeries.pos.map((v, i) => v + a.usageSeries.invoicesAi[i]) : null;
           return `<tr data-href="#/accounts/${a.id}?tab=health">
             <td data-label="Account"><a class="row-link" href="#/accounts/${a.id}?tab=health">${esc(a.name)}</a> ${segBadge(a.segment)}<div class="muted xs">${esc(a.status)} · ${moneyCompact(a.deal.amount)} ARR${team ? ` · ${esc(a.csm)}` : ''}</div></td>
             <td data-label="Health">${riskChip(a.healthLevel, a.health)}</td>
             <td data-label="What's going on" class="small ${a.csStatus?.tone ? `tone-${a.csStatus.tone}` : ''}">${esc(a.csStatus?.text ?? '')}${a.support.open ? `<div class="muted xs">${a.support.open} open support${a.support.escalated ? ` · ${a.support.escalated} with engineering` : ''}</div>` : ''}</td>
-            <td class="hide-sm"><div class="row" style="gap:8px;flex-wrap:nowrap">${vol ? sparkline(vol, { label: 'POs + AI invoices per week', w: 110, h: 30 }) : ''}<span class="small">${trendText(a.usageTrendPct)}</span></div></td>
-            <td class="hide-sm small">${renewalCell(a)}</td>
+            <td class="hide-sm opt-a"><div class="row gap-2 no-wrap">${vol ? sparkline(vol, { label: 'POs + AI invoices per week', w: 110, h: 30 }) : ''}<span class="small">${trendText(a.usageTrendPct)}</span></div></td>
+            <td class="hide-sm opt-b small">${renewalCell(a)}</td>
             <td data-label="Next suggested action" class="pl-next">${csCell(a)}</td>
           </tr>${state.pfOpen.has(a.id) && a.csSuggestions.length > 1 ? `
           <tr class="sa-row"><td colspan="${cols}">
@@ -1595,8 +1599,8 @@ async function renderRequests() {
   const cols = 2 + showAccount + showRequest + showStatus;
   const row = (x) => `<tr data-href="#/accounts/${esc(x.accountId)}?tab=requests">
     ${showAccount ? `<td data-label="Account"><a class="link" href="#/accounts/${esc(x.accountId)}?tab=requests">${esc(x.name)}</a> ${segBadge(x.segment)}<div class="muted xs">${moneyCompact(x.arr)} ARR${state.frScope === 'all' ? ` · CSM ${esc(x.csm)}` : ''}</div></td>` : ''}
-    ${showRequest ? `<td data-label="Request"><div style="font-weight:500">${esc(x.fr.title)}</div><div class="row" style="gap:6px"><span class="mono muted xs">${esc(x.fr.jiraKey)}</span>${showStatus ? '' : frSimBtn(x.fr)}</div></td>` : ''}
-    ${showStatus ? `<td data-label="Status"><div class="row" style="gap:6px;flex-wrap:nowrap">${frStatus(x.fr.status)}${frSimBtn(x.fr)}</div><div class="muted xs">Updated ${rel(x.fr.updatedAt)}</div></td>` : ''}
+    ${showRequest ? `<td data-label="Request"><div class="fw-500">${esc(x.fr.title)}</div><div class="row gap-1"><span class="mono muted xs">${esc(x.fr.jiraKey)}</span>${showStatus ? '' : frSimBtn(x.fr)}</div></td>` : ''}
+    ${showStatus ? `<td data-label="Status"><div class="row gap-1 no-wrap">${frStatus(x.fr.status)}${frSimBtn(x.fr)}</div><div class="muted xs">Updated ${rel(x.fr.updatedAt)}</div></td>` : ''}
     <td data-label="Asked" class="small">${rel(x.requestedAt)}</td>
     <td data-label="Customer">${frCustomerCell(x.fr, x)}</td>
   </tr>`;
@@ -1611,8 +1615,8 @@ async function renderRequests() {
     </div>
     ${toTell.length ? `<div class="card callout"><svg class="ico"><use href="#i-bulb"/></svg><div class="grow"><b>${toTell.length} ${toTell.length === 1 ? 'customer is' : 'customers are'} waiting to hear</b> that their request shipped.</div><button class="btn sm" data-frfilter="shipped">Show shipped</button></div>` : ''}
     <div class="spread fr-toolbar">
-      <div class="filters">${filters.map(([id, label, t]) => `<span class="chip ${state.frStatus === id ? 'sel' : ''}" role="button" tabindex="0" aria-pressed="${state.frStatus === id}" data-frfilter="${id}">${label} · ${rows.filter(t).length}</span>`).join('')}</div>
-      <div class="row" style="gap:8px"><span class="muted small">Group by</span>
+      <div class="seg seg-inline" role="group" aria-label="Status">${segButtons('frfilter', filters.map(([id, label, t]) => [id, label, rows.filter(t).length]), state.frStatus)}</div>
+      <div class="row gap-2"><span class="muted small">Group by</span>
         <div class="seg seg-inline" role="group" aria-label="Group by">
           ${[['account', 'Account'], ['request', 'Request'], ['status', 'Status']].map(([id, label]) => `<button class="${state.frGroup === id ? 'sel' : ''}" data-frgroup="${id}" aria-pressed="${state.frGroup === id}">${label}</button>`).join('')}
         </div>
@@ -1624,7 +1628,7 @@ async function renderRequests() {
           ${showAccount ? '<th>Account</th>' : ''}${showRequest ? '<th>Request</th>' : ''}${showStatus ? '<th>Status</th>' : ''}<th>Asked</th><th>Customer</th>
         </tr></thead>
         ${ordered.map((g) => `<tbody>
-          <tr class="group-row"><th colspan="${cols}" scope="rowgroup"><div class="row" style="gap:8px">${groupHead(g)}${state.frGroup === 'request' ? `<span class="grow"></span>${frStatus(g.first.fr.status)}${frSimBtn(g.first.fr)}` : ''}</div></th></tr>
+          <tr class="group-row"><th colspan="${cols}" scope="rowgroup"><div class="row gap-2">${groupHead(g)}${state.frGroup === 'request' ? `<span class="grow"></span>${frStatus(g.first.fr.status)}${frSimBtn(g.first.fr)}` : ''}</div></th></tr>
           ${g.rows.map(row).join('')}
         </tbody>`).join('') || `<tbody><tr><td colspan="${cols}" class="empty">No feature requests here.</td></tr></tbody>`}
       </table>
@@ -1664,18 +1668,18 @@ async function renderOnboarding() {
       <div><h1>Onboarding</h1><p class="muted">Every hotel group from kickoff to go-live. Usage-based steps tick themselves off.</p></div>
       ${anyActive && can('onboarding.edit') ? `<button class="btn" id="sync-all">${icon('i-reset')}Refresh usage</button>` : ''}
     </div>
-    <div class="filters" style="margin-bottom:12px">${filters.map(([id, label, t]) => `<span class="chip ${state.onbFilter === id ? 'sel' : ''}" role="button" tabindex="0" aria-pressed="${state.onbFilter === id}" data-onbf="${id}">${label} · ${all.filter(t).length}</span>`).join('')}</div>
+    <div class="toolbar"><div class="seg seg-inline" role="group" aria-label="Show">${segButtons('onbf', filters.map(([id, label, t]) => [id, label, all.filter(t).length]), state.onbFilter)}</div></div>
     <div class="card table-wrap">
       <table class="table onb-table">
-        <thead><tr><th>Account</th><th>Progress</th><th>Next suggested action</th><th>Timeline</th><th class="center-col">Properties live</th><th>CSM</th></tr></thead>
+        <thead><tr><th>Account</th><th>Progress</th><th>Next suggested action</th><th>Timeline</th><th class="center-col">Properties live</th><th class="opt-a">CSM</th></tr></thead>
         <tbody>${list.map((a) => `
           <tr data-href="#/accounts/${esc(a.id)}?tab=overview">
             <td data-label="Account"><a class="row-link" href="#/accounts/${esc(a.id)}?tab=overview">${esc(a.name)}</a> ${segBadge(a.segment)}<div class="muted xs">${esc(a.status)}</div></td>
-            <td data-label="Progress"><div class="pips" aria-hidden="true">${Array.from({ length: a.onboarding.total }, (_, i) => `<span class="pip ${i < a.onboarding.done ? 'on' : ''}"></span>`).join('')}</div><div class="small" style="margin-top:4px">${a.onboarding.done}/${a.onboarding.total} steps</div></td>
+            <td data-label="Progress"><div class="pips" aria-hidden="true">${Array.from({ length: a.onboarding.total }, (_, i) => `<span class="pip ${i < a.onboarding.done ? 'on' : ''}"></span>`).join('')}</div><div class="small mt-1">${a.onboarding.done}/${a.onboarding.total} steps</div></td>
             <td data-label="Next suggested action" class="pl-next">${stepCell(a)}</td>
             <td data-label="Timeline" class="small">${a.onboarding.completedAt ? `Done in ${days(a.onboarding.startedAt) - days(a.onboarding.completedAt)} days` : `<span class="${days(a.onboarding.startedAt) > 10 ? 'tone-warn' : ''}">Day ${days(a.onboarding.startedAt)}</span>`}</td>
             <td data-label="Properties live" class="num center-col small">${a.usage?.propertiesLive ?? 0}/${a.properties}</td>
-            <td data-label="CSM" class="small">${esc(a.csm)}</td>
+            <td data-label="CSM" class="small opt-a">${esc(a.csm)}</td>
           </tr>`).join('') || `<tr><td colspan="6" class="empty">${state.onbFilter === 'active' ? 'Nobody is onboarding right now. Closing a deal starts one automatically.' : 'Nothing here yet.'}</td></tr>`}</tbody>
       </table>
     </div>`;
@@ -1710,10 +1714,10 @@ async function renderApprovals() {
   const decision = (p) => {
     if (p.status !== 'pending') {
       return `<span class="chip ${p.status === 'approved' ? 'good' : 'bad'}">${icon(p.status === 'approved' ? 'i-done' : 'i-x')}${p.status === 'approved' ? 'Approved' : 'Rejected'}</span>
-        <div class="muted xs" style="margin-top:4px">by ${esc(p.decidedBy)} ${p.via === 'slack' ? 'in Slack' : 'in the hub'} · ${rel(p.decidedAt)}</div>`;
+        <div class="muted xs mt-1">by ${esc(p.decidedBy)} ${p.via === 'slack' ? 'in Slack' : 'in the hub'} · ${rel(p.decidedAt)}</div>`;
     }
     if (can('approvals.decide')) {
-      return `<div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn primary sm" data-decide="approved" data-id="${p.id}">Approve</button><button class="btn sm danger" data-decide="rejected" data-id="${p.id}">Reject</button></div>`;
+      return `<div class="row gap-1 no-wrap"><button class="btn primary sm" data-decide="approved" data-id="${p.id}">Approve</button><button class="btn sm danger" data-decide="rejected" data-id="${p.id}">Reject</button></div>`;
     }
     return `<div class="small">Waiting on ${esc(approver.name)}</div>
       <button class="btn sm ghost apr-sim" data-slack="${p.id}" title="Demo: sends the same payload Slack sends when ${esc(approver.name)} clicks Approve">${icon('i-play')}Approve as ${esc(approver.name.split(' ')[0])} in Slack</button>`;
@@ -1723,7 +1727,7 @@ async function renderApprovals() {
     <div class="page-head">
       <div><h1>Approvals</h1><p class="muted">Discounts above ${state.meta.config.discountApprovalThreshold}% go to <span class="mono">#deal-desk</span> in Slack. ${esc(approver.name)} approves there or here, and HubSpot updates either way.</p></div>
     </div>
-    <div class="filters" style="margin-bottom:12px">${filters.map(([id, label, t]) => `<span class="chip ${state.aprFilter === id ? 'sel' : ''}" role="button" tabindex="0" aria-pressed="${state.aprFilter === id}" data-aprf="${id}">${label} · ${list.filter(t).length}</span>`).join('')}</div>
+    <div class="toolbar"><div class="seg seg-inline" role="group" aria-label="Show">${segButtons('aprf', filters.map(([id, label, t]) => [id, label, list.filter(t).length]), state.aprFilter)}</div></div>
     <div class="card table-wrap">
       <table class="table apr-table">
         <thead><tr><th>Deal</th><th class="num-col">Discount</th><th class="num-col">ARR after discount</th><th>Reason</th><th>Requested</th><th>Decision</th></tr></thead>
@@ -1771,10 +1775,7 @@ async function renderLog(query = new URLSearchParams()) {
   view.innerHTML = `
     <div class="page-head">
       <div><h1>Activity log</h1><p class="muted">Everything the hub did for the team, in plain words. Open a row to see each step it took in HubSpot, Intercom, Jira, Slack, Snowflake or Claude.</p></div>
-      <div class="filters">
-        <span class="chip ${!state.logFilter ? 'sel' : ''}" data-f="" role="button" tabindex="0">All · ${all.length}</span>
-        ${Object.entries(SYSTEMS).map(([k, x]) => { const n = all.filter((a) => systemsOf(a).includes(k)).length; return n ? `<span class="chip ${state.logFilter === k ? 'sel' : ''}" data-f="${k}" role="button" tabindex="0">${x.name} · ${n}</span>` : ''; }).join('')}
-      </div>
+      <div class="seg seg-inline" role="group" aria-label="System">${segButtons('f', [['', 'All', all.length], ...Object.entries(SYSTEMS).map(([k, x]) => [k, x.name, all.filter((a) => systemsOf(a).includes(k)).length]).filter((x) => x[2])], state.logFilter ?? '')}</div>
     </div>
     <div class="card">
       ${rows.map((a) => `
@@ -1794,10 +1795,10 @@ async function renderLog(query = new URLSearchParams()) {
                 <div class="grow">
                   <div><b>${esc(SYSTEMS[x.system]?.name ?? x.system)}</b> · ${esc(x.summary)}</div>
                   <details class="tech"><summary class="xs muted">Technical details</summary>
-                    <div class="xs muted" style="margin:6px 0">${x.mode === 'live' ? 'Live' : 'Mock mode (nothing left the server)'} · ${x.status} · ${x.durationMs} ms</div>
+                    <div class="xs muted mt-2 mb-2">${x.mode === 'live' ? 'Live' : 'Mock mode (nothing left the server)'} · ${x.status} · ${x.durationMs} ms</div>
                     <div class="log-body">
-                      <div><div class="muted xs" style="margin-bottom:4px">Sent</div><pre class="code">${esc(`${x.request.method} ${x.request.url}\n\n${JSON.stringify(x.request.body ?? null, null, 2)}`)}</pre></div>
-                      <div><div class="muted xs" style="margin-bottom:4px">Received</div><pre class="code">${esc(JSON.stringify(x.response, null, 2))}</pre></div>
+                      <div><div class="muted xs mb-1">Sent</div><pre class="code">${esc(`${x.request.method} ${x.request.url}\n\n${JSON.stringify(x.request.body ?? null, null, 2)}`)}</pre></div>
+                      <div><div class="muted xs mb-1">Received</div><pre class="code">${esc(JSON.stringify(x.response, null, 2))}</pre></div>
                     </div>
                   </details>
                 </div>
@@ -1831,9 +1832,9 @@ function renderConnections() {
           <div class="mono muted xs">${i.env.map(esc).join('<br>')}</div>
         </div>`).join('')}
     </div>
-    <div class="card card-pad" style="margin-top:16px">
-      <h2 style="margin-bottom:6px">Inbound webhooks</h2>
-      <p class="muted small" style="margin-bottom:10px">Point these at the hub. Signatures are verified when the secrets are set.</p>
+    <div class="card card-pad mt-4">
+      <h2 class="mb-2">Inbound webhooks</h2>
+      <p class="muted small mb-3">Point these at the hub. Signatures are verified when the secrets are set.</p>
       <pre class="code">POST ${esc(origin)}/webhooks/intercom   # Intercom: conversation.user.created, conversation.user.replied
 POST ${esc(origin)}/webhooks/slack      # Slack app → Interactivity request URL (approval buttons)
 POST ${esc(origin)}/webhooks/jira       # Jira: issue updated (feature request status)</pre>
